@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #101113;
+  --ink-soft: #181b1f;
+  --paper: #f8f4ea;
+  --paper-muted: #d7d0c2;
+  --mist: #8fa9a1;
+  --moss: #5f7a70;
+  --amber: #c28a48;
+  --rose: #b76f74;
+  --line: rgba(248, 244, 234, 0.14);
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-paper-muted: var(--paper-muted);
+  --color-mist: var(--mist);
+  --color-moss: var(--moss);
+  --color-amber: var(--amber);
+  --color-rose: var(--rose);
+  --color-line: var(--line);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+}
+
+* { box-sizing: border-box; }
+
+html { min-height: 100%; }
+
+body {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 20% 12%, rgba(143, 169, 161, 0.16), transparent 32rem),
+    radial-gradient(circle at 80% 0%, rgba(194, 138, 72, 0.12), transparent 30rem),
+    linear-gradient(135deg, #101113 0%, #181b1f 45%, #111416 100%);
+  color: var(--paper);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: rgba(194, 138, 72, 0.45);
+  color: #fffaf0;
+}
+
+button,
+a,
+textarea,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

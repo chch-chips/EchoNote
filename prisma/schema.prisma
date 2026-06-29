@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum NoteSource {
+  WEB
+  WECHAT_CC_CONNECT
+  API
+  IMPORT
+}
+
+enum AiStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum NoteKind {
+  THOUGHT
+  PLAN
+  REMINDER
+  QUOTE
+  OBSERVATION
+  INFO
+  OTHER
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  notes       Note[]
+}
+
+model Note {
+  id              String           @id @default(cuid())
+  userId          String
+  content         String
+  source          NoteSource       @default(WEB)
+  rawMessage      String?
+  clientCreatedAt DateTime?
+  aiStatus        AiStatus         @default(PENDING)
+  aiError         String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysis        NoteAiAnalysis?
+  fragments       MemoryFragment[]
+
+  @@index([createdAt])
+  @@index([source])
+  @@index([aiStatus])
+  @@index([userId, createdAt])
+}
+
+model NoteAiAnalysis {
+  id             String    @id @default(cuid())
+  noteId         String    @unique
+  summary        String?
+  keywords       String[]  @default([])
+  mood           String?
+  energy         Int?
+  kind           NoteKind?
+  poeticFragment String?
+  model          String?
+  processedAt    DateTime  @default(now())
+  note           Note      @relation(fields: [noteId], references: [id], onDelete: Cascade)
+}
+
+model MemoryFragment {
+  id        String   @id @default(cuid())
+  noteId    String
+  text      String
+  tone      String?
+  weight    Int      @default(1)
+  createdAt DateTime @default(now())
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([weight])
+}
+
+model InletMessage {
+  id         String     @id @default(cuid())
+  source     NoteSource
+  externalId String
+  noteId     String?
+  raw        Json?
+  createdAt  DateTime   @default(now())
+
+  @@unique([source, externalId])
+  @@index([createdAt])
+}

@@ -1,0 +1,29 @@
+services:
+  web:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg18-trixie
+    environment:
+      POSTGRES_DB: echo_note
+      POSTGRES_USER: echo_note_user
+      POSTGRES_PASSWORD: change-me
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - echo-note-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U echo_note_user -d echo_note"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  echo-note-postgres-data:
