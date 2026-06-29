@@ -36,8 +36,20 @@ export async function createNote(input: CreateNoteInput) {
   });
 }
 
+export async function deleteNote(noteId: string) {
+  const owner = await ensureOwnerUser();
+  const result = await prisma.note.deleteMany({
+    where: {
+      id: noteId,
+      userId: owner.id,
+    },
+  });
+
+  return result.count === 1;
+}
+
 export async function listNotes(options: { query?: string; source?: NoteSource; take?: number; cursor?: string }) {
-  const take = Math.min(Math.max(options.take ?? 40, 1), 100);
+  const take = Math.min(Math.max(options.take ?? 40, 1), 250);
   return prisma.note.findMany({
     where: {
       source: options.source,

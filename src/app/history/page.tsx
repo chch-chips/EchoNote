@@ -1,5 +1,6 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { ArrowLeft, Search } from "lucide-react";
+import { DeleteNoteButton } from "@/components/delete-note-button";
 import { listNotes } from "@/lib/notes";
 import { requirePageAuth } from "@/lib/page-auth";
 
@@ -9,7 +10,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
   await requirePageAuth();
 
   const params = await searchParams;
-  const notes = await listNotes({ query: params.q, take: 80 }).catch(() => []);
+  const notes = await listNotes({ query: params.q, take: 250 }).catch(() => []);
 
   return (
     <main className="min-h-dvh px-4 py-6 sm:px-8">
@@ -29,7 +30,10 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
         <div className="grid gap-3">
           {notes.map((note) => (
             <article key={note.id} className="rounded-2xl border border-line bg-ink-soft/70 p-4 backdrop-blur">
-              <p className="whitespace-pre-wrap text-base leading-8 text-paper">{note.content}</p>
+              <div className="flex items-start gap-3">
+                <p className="min-w-0 flex-1 whitespace-pre-wrap text-base leading-8 text-paper">{note.content}</p>
+                <DeleteNoteButton noteId={note.id} preview={note.content} />
+              </div>
               {note.analysis?.poeticFragment ? <p className="mt-3 border-l border-amber/50 pl-3 font-serif text-sm leading-7 text-paper-muted">{note.analysis.poeticFragment}</p> : null}
               <div className="mt-4 flex flex-wrap gap-3 text-xs text-paper-muted">
                 <time dateTime={note.createdAt.toISOString()}>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(note.createdAt)}</time>
