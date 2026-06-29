@@ -1,4 +1,4 @@
-﻿# 部署说明
+# 部署说明
 
 本文档记录当前服务器事实和后续安全部署路径。它不是服务器变更授权；任何写入、创建数据库、部署服务之前都需要再次确认。
 
@@ -46,3 +46,26 @@ DATABASE_URL="postgresql://echo_note_user:<password>@127.0.0.1:15432/echo_note?s
 3. 创建 `echo_note` 数据库和 `echo_note_user` 用户。
 4. 保持 Postgres 只监听服务器本机地址。
 5. 通过 SSH 隧道在本地执行迁移，或未来从应用容器执行迁移。
+
+## EchoNote Web 与 AI worker
+
+EchoNote 需要两个长期进程：
+
+```powershell
+npm run start
+npm run worker:ai
+```
+
+本地开发可用：
+
+```powershell
+npm run dev:all
+```
+
+新增 `MemoryRainSnapshot` 表后，需要在确认数据库连接安全的前提下执行：
+
+```powershell
+npm run db:push
+```
+
+不要把 AI worker 放进单个 Next.js Route Handler 长循环里；生产部署应使用 systemd、PM2、Docker Compose 或同等进程管理方式分别守护 Web 和 worker。

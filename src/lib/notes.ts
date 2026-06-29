@@ -9,7 +9,7 @@ export type CreateNoteInput = {
 };
 
 export function normalizeCaptureContent(content: string) {
-  return content.replace(/s*#s*$/u, "").trim();
+  return content.replace(/\s*#\s*$/u, "").trim();
 }
 
 export async function ensureOwnerUser() {

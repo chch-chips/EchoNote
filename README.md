@@ -1,4 +1,4 @@
-﻿# EchoNote / 回声笺
+# EchoNote / 回声笺
 
 EchoNote 是一个私人瞬时记录工具，用来收下生活、工作、学习里突然出现的念头、提醒、计划、摘句和细碎信息。V1 先服务个人自用：网页快速记录、移动端适配、普通微信通过 cc-connect + 本机 Agent 写入。
 
@@ -39,10 +39,16 @@ Copy-Item .env.example .env
 npm run db:generate
 ```
 
-启动开发服务：
+启动开发服务（仅 Web）：
 
 ```powershell
 npm run dev
+```
+
+启动开发服务和 AI 常驻 worker：
+
+```powershell
+npm run dev:all
 ```
 
 ## 数据库
@@ -80,10 +86,16 @@ Content-Type: application/json
 
 ## AI Worker
 
-手动处理待分析小记：
+常驻处理待分析小记：
 
 ```powershell
 npm run worker:ai
+```
+
+手动处理一批待分析小记：
+
+```powershell
+npm run worker:ai:once
 ```
 
 默认 AI 配置：
@@ -92,10 +104,11 @@ npm run worker:ai
 - `AI_MODEL=deepseek-v4-flash`
 - `DEEPSEEK_API_KEY=...`
 
+AI 分析、记忆碎片、24 小时记忆雨快照和 Three.js 渲染链路见 [技术架构说明](docs/technical-architecture.md)。
+
 ## 文档
 
 - [技术架构说明](docs/technical-architecture.md)
 - [设计系统](docs/design-system.md)
 - [cc-connect 接入指南](docs/cc-connect.md)
 - [部署说明](docs/deployment.md)
-

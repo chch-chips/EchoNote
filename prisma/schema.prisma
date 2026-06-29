@@ -88,6 +88,18 @@ model MemoryFragment {
   @@index([weight])
 }
 
+model MemoryRainSnapshot {
+  id            String   @id @default(cuid())
+  seed          Int
+  fragmentIds   String[]
+  generatedAt   DateTime @default(now())
+  refreshAfter  DateTime
+  forcedRefresh Boolean  @default(false)
+
+  @@index([refreshAfter])
+  @@index([generatedAt])
+}
+
 model InletMessage {
   id         String     @id @default(cuid())
   source     NoteSource

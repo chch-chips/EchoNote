@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "node scripts/dev-all.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
-    "worker:ai": "tsx scripts/process-ai.ts"
+    "worker:ai": "tsx scripts/process-ai.ts",
+    "worker:ai:once": "tsx scripts/process-ai.ts --once"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
