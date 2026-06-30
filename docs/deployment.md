@@ -62,6 +62,48 @@ npm run worker:ai
 npm run dev:all
 ```
 
+### Codex 桌面环境启动 Web dev server
+
+普通终端中仍然优先使用：
+
+```powershell
+npm run dev
+```
+
+Codex 桌面工具里不要把 `npm run dev` 作为前台长期命令直接挂住。2026-06-30 复测稳定的做法是用 `cmd start /b` 脱离当前工具调用，并把日志写入本地文件：
+
+```powershell
+$cwd = "D:\code\xiaoji"
+$node = "D:\Program Files\nodejs\node.exe"
+$out = Join-Path $cwd "dev.codex.out.log"
+$err = Join-Path $cwd "dev.codex.err.log"
+$q = [char]34
+$inner = "$q$node$q $q.\node_modules\next\dist\bin\next$q dev > $q$out$q 2> $q$err$q"
+$startCommand = "start $qEchoNoteDev$q /b cmd.exe /d /c $q$inner$q"
+Push-Location $cwd
+& $env:ComSpec /d /c $startCommand
+Pop-Location
+```
+
+验活：
+
+```powershell
+Invoke-WebRequest -Uri http://localhost:3000 -UseBasicParsing -TimeoutSec 10
+netstat -ano | Select-String ":3000"
+```
+
+停止时先从 `netstat` 找到监听 `:3000` 的 PID，再停止该进程树：
+
+```powershell
+taskkill /PID <PID> /T /F
+```
+
+注意：这只启动 Web dev server。若 `.env` 中的 `DATABASE_URL` 指向 `127.0.0.1:15432`，仍需另开终端保持 SSH 隧道：
+
+```powershell
+ssh -N -L 15432:127.0.0.1:5432 chips-server
+```
+
 新增 `MemoryRainSnapshot` 表后，需要在确认数据库连接安全的前提下执行：
 
 ```powershell

@@ -45,6 +45,7 @@ next-env.d.ts
 # local dev server logs
 /dev.out.log
 /dev.err.log
+/dev.codex.*.log
 
 # local private data and tool artifacts
 /.playwright-mcp/
