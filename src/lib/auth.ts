@@ -79,6 +79,15 @@ export function verifyCaptureToken(request: NextRequest) {
 }
 
 function cookieAttributes(maxAge: number) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = shouldUseSecureCookies() ? "; Secure" : "";
   return "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
+}
+
+function shouldUseSecureCookies() {
+  const configured = process.env.SESSION_COOKIE_SECURE;
+  if (configured) {
+    return !["0", "false", "no", "off"].includes(configured.toLowerCase());
+  }
+
+  return process.env.NODE_ENV === "production";
 }

@@ -144,6 +144,7 @@ EchoNote 使用隔离部署：
 - nginx 独立入口：`/www/server/panel/vhost/nginx/echonote-8081.conf`
 - nginx 公网监听：`8081`
 - 访问地址：`http://101.35.48.157:8081`
+- 当前入口是 HTTP，不是 HTTPS，因此 `/etc/echonote/echonote.env` 中设置 `SESSION_COOKIE_SECURE=false`。未来切换到 HTTPS 域名后应改回 `true`，再重启 `echonote-web`。
 
 当前服务器内验证结果：
 
@@ -155,6 +156,24 @@ curl -I http://127.0.0.1:8081/login
 `echonote-web` 与 `echonote-worker` 均已启用开机自启。服务器本机访问 `127.0.0.1:8081/login` 返回 `200 OK`。
 
 注意：服务器系统防火墙 `firewalld` 当前为 inactive，但从公网直连 `101.35.48.157:8081` 超时，说明腾讯云安全组大概率尚未放行 `8081/tcp`。在腾讯云控制台放行该端口后，公网 IP 访问才会生效。不要为了公网访问直接接管现有 `80` 端口，除非确认要迁移或合并既有项目入口。
+
+若 HTTP 入口可以打开登录页但登录后仍回到登录页，优先检查 cookie Secure 模式：
+
+```bash
+grep '^SESSION_COOKIE_SECURE=' /etc/echonote/echonote.env
+```
+
+HTTP 临时访问应为：
+
+```env
+SESSION_COOKIE_SECURE=false
+```
+
+HTTPS 正式访问应为：
+
+```env
+SESSION_COOKIE_SECURE=true
+```
 
 ### 手动发布更新
 
@@ -204,3 +223,23 @@ curl -I http://127.0.0.1:8081/login
 ### 后续自动部署方向
 
 自动部署可以作为额外配置追加：让 GitHub Actions 在 `main` 更新后通过 SSH 登录服务器，执行上面的手动发布命令。建议等 `8081` 公网入口确认可访问后，再把这些命令固化为 `/opt/echonote/deploy.sh`，最后由 GitHub Actions 远程调用该脚本。
+
+### 后续 HTTPS 正式方案
+
+当前 `http://101.35.48.157:8081` 只是临时可用入口。稳定使用后建议切换到 HTTPS 域名入口：
+
+1. 准备一个域名或子域名，例如 `note.example.com`。
+2. 将域名 DNS A 记录指向 `101.35.48.157`。
+3. 在腾讯云安全组放行 `80/tcp` 和 `443/tcp`。
+4. 使用宝塔面板、Certbot 或 acme.sh 为该域名申请 Let's Encrypt 证书。
+5. 新增独立 nginx HTTPS server，将 `443` 的该域名代理到 `127.0.0.1:3001`。
+6. 将 `/etc/echonote/echonote.env` 中的 `SESSION_COOKIE_SECURE=false` 改为 `SESSION_COOKIE_SECURE=true`。
+7. 重启服务：
+
+```bash
+systemctl restart echonote-web
+/www/server/nginx/sbin/nginx -t
+/www/server/nginx/sbin/nginx -s reload
+```
+
+切到 HTTPS 后，浏览器会正常保存 Secure Cookie，登录态也会比 HTTP 临时入口更安全。

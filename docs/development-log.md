@@ -1,8 +1,10 @@
 # EchoNote 开发日志
 
-本文档按时间记录每一轮使用 Codex 进行 Vibe Coding 的开发沉淀。它不按功能模块重新整理，只记录当轮需求、执行任务、完成效果、核心设计与问题修复。
+本文档按每一次开发记录使用 Codex 进行 Vibe Coding 的沉淀。每条记录都是独立的一次开发，不按日期归档；日期只作为记录元信息，方便回溯。
 
-## 2026-07-01
+## 开发记录 001：首页与交互记忆雨重构
+
+记录时间：2026-07-01
 
 ### 需求
 
@@ -51,11 +53,51 @@
 - Playwright/Edge 检查过桌面、375px 移动端、平板视口：canvas 与输入框存在，无横向溢出，无控制台错误。
 - 直接调用 `GET /api/notes/[id]` Route Handler：无 cookie 返回 401，有 session 返回 200，并能取回原文。
 
-### 服务器隔离部署
+## 开发记录 002：服务器隔离部署与 HTTP 登录修复
+
+记录时间：2026-07-01
+
+### 需求
+
+- 将 EchoNote 先部署到腾讯云服务器，日常可以直接通过服务器 IP 使用。
+- 部署方式必须和服务器上已有前后端项目互不影响。
+- 当前阶段先用 HTTP 临时入口跑起来，后续稳定后再切换 HTTPS 正式方案。
+- 更新文档，记录部署事实、手动发布流程、HTTPS 后续方案和登录修复原因。
+
+### 执行任务
 
 - 在腾讯云 `chips-server` 上安装 Node.js 20.20.0 与 npm 10.8.2。
 - 将仓库克隆到 `/opt/echonote`，生产环境变量写入 `/etc/echonote/echonote.env`，并用符号链接暴露为 `/opt/echonote/.env`。
 - 复用现有 `gewu-postgres` 容器，但只创建 EchoNote 独立数据库 `echo_note` 和独立用户 `echo_note_user`，不重启、不覆盖原容器。
 - 新增 `echonote-web` 与 `echonote-worker` 两个 systemd 服务，分别运行 Next.js standalone Web 和 AI worker。
 - 为避免影响服务器上已有的 `yu-picture-frontend`，EchoNote Web 只监听 `127.0.0.1:3001`，nginx 新增独立 `8081` 入口代理到该端口。
-- 服务器本机 `curl -I http://127.0.0.1:8081/login` 返回 `200 OK`；公网 `101.35.48.157:8081` 仍需在腾讯云安全组放行 `8081/tcp`。
+- 新增 `SESSION_COOKIE_SECURE` 环境变量，让生产环境默认仍使用 Secure Cookie，但允许 HTTP 临时部署显式关闭。
+- 在部署文档中记录当前隔离端口、服务名、手动发布命令、HTTP Cookie 模式和后续 HTTPS 正式方案。
+
+### 完成效果
+
+- EchoNote Web 服务已由 `echonote-web` 守护，监听 `127.0.0.1:3001`。
+- AI worker 已由 `echonote-worker` 守护，持续处理待分析小记。
+- nginx 通过独立 `8081` 入口代理 EchoNote，没有改动既有 `80` 端口项目。
+- 公网安全组放行 `8081/tcp` 后，可通过 `http://101.35.48.157:8081` 打开 EchoNote。
+- HTTP 临时入口设置 `SESSION_COOKIE_SECURE=false` 后，浏览器可以保存登录 cookie；后续切换 HTTPS 域名时改回 `true`。
+
+### 核心设计
+
+- 部署目录、环境变量、数据库、systemd 服务和 nginx 入口全部独立，避免与既有项目耦合。
+- PostgreSQL 继续只暴露在服务器本机，EchoNote 使用独立库和独立用户。
+- HTTP 入口只作为临时可用方案；正式方案应使用域名、证书、`443` 和 Secure Cookie。
+
+### 问题修复
+
+- 公网放行 `8081` 后，HTTP 入口能打开登录页，但浏览器无法保持登录态。
+- 根因是生产环境默认给 `echonote_session` 设置 `Secure` Cookie，而 `http://101.35.48.157:8081` 不是 HTTPS，浏览器会拒绝保存该 cookie。
+- 登录接口在服务器本机测试中返回 `200 OK`，且 `Set-Cookie` 带 `Secure`，确认问题不是密码错误，而是 HTTP 下浏览器拒收 Secure Cookie。
+
+### 验证记录
+
+- 服务器本机 `curl -I http://127.0.0.1:8081/login` 返回 `200 OK`。
+- `systemctl is-active echonote-web echonote-worker` 均返回 `active`。
+- `ss -ltnp` 显示 `127.0.0.1:3001` 和 `0.0.0.0:8081` 已监听。
+- 本地 `npm run lint` 通过。
+- 本地 `npm run typecheck` 通过。
