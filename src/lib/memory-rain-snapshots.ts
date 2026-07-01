@@ -65,6 +65,7 @@ async function fallbackFromNotes() {
   const notes = await prisma.note.findMany({ orderBy: { createdAt: "desc" }, take: Math.min(fragmentLimit(), 40) });
   return notes.map((note) => ({
     id: note.id,
+    noteId: note.id,
     text: note.content.slice(0, 120),
     tone: null,
     weight: 1,

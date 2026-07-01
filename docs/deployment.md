@@ -49,12 +49,23 @@ DATABASE_URL="postgresql://echo_note_user:<password>@127.0.0.1:15432/echo_note?s
 
 ## EchoNote Web 与 AI worker
 
-EchoNote 需要两个长期进程：
+EchoNote 生产构建使用 `output: "standalone"`。生产环境需要两个长期进程。
+
+Web 进程：
 
 ```powershell
-npm run start
+npm run build
+$env:PORT="3000"
+node .next\standalone\server.js
+```
+
+AI worker 进程：
+
+```powershell
 npm run worker:ai
 ```
+
+`next start` 不适用于当前 standalone 输出。
 
 本地开发可用：
 

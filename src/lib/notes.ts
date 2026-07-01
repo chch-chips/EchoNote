@@ -48,6 +48,13 @@ export async function deleteNote(noteId: string) {
   return result.count === 1;
 }
 
+export async function getNote(noteId: string) {
+  return prisma.note.findUnique({
+    where: { id: noteId },
+    include: { analysis: true },
+  });
+}
+
 export async function listNotes(options: { query?: string; source?: NoteSource; take?: number; cursor?: string }) {
   const take = Math.min(Math.max(options.take ?? 40, 1), 250);
   return prisma.note.findMany({

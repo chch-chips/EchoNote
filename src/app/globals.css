@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #101113;
-  --ink-soft: #181b1f;
+  --ink: #0f1110;
+  --ink-soft: #171a18;
   --paper: #f8f4ea;
-  --paper-muted: #d7d0c2;
+  --paper-muted: #cfc8b8;
   --mist: #8fa9a1;
-  --moss: #5f7a70;
-  --amber: #c28a48;
+  --moss: #647d70;
+  --amber: #c99457;
   --rose: #b76f74;
   --line: rgba(248, 244, 234, 0.14);
 }
@@ -24,6 +24,7 @@
   --color-line: var(--line);
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
+  --ease-echonote: cubic-bezier(0.2, 0, 0, 1);
 }
 
 * { box-sizing: border-box; }
@@ -33,15 +34,17 @@ html { min-height: 100%; }
 body {
   min-height: 100%;
   background:
-    radial-gradient(circle at 20% 12%, rgba(143, 169, 161, 0.16), transparent 32rem),
-    radial-gradient(circle at 80% 0%, rgba(194, 138, 72, 0.12), transparent 30rem),
-    linear-gradient(135deg, #101113 0%, #181b1f 45%, #111416 100%);
+    linear-gradient(112deg, rgba(100, 125, 112, 0.18), transparent 34%),
+    linear-gradient(248deg, rgba(183, 111, 116, 0.10), transparent 30%),
+    repeating-linear-gradient(90deg, rgba(248, 244, 234, 0.028) 0 1px, transparent 1px 84px),
+    repeating-linear-gradient(0deg, rgba(248, 244, 234, 0.022) 0 1px, transparent 1px 84px),
+    linear-gradient(145deg, #0f1110 0%, #171a18 46%, #121515 100%);
   color: var(--paper);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
 ::selection {
-  background: rgba(194, 138, 72, 0.45);
+  background: rgba(201, 148, 87, 0.45);
   color: #fffaf0;
 }
 
@@ -51,6 +54,10 @@ textarea,
 input {
   -webkit-tap-highlight-color: transparent;
 }
+
+button { cursor: pointer; }
+
+button:disabled { cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
