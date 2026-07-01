@@ -1,4 +1,4 @@
-﻿import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 export const SESSION_COOKIE = "echonote_session";
@@ -55,11 +55,11 @@ export function isWebAuthenticated(request: NextRequest) {
 }
 
 export function sessionCookieHeader(value: string) {
-  return SESSION_COOKIE + "=" + value + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + SESSION_TTL_SECONDS;
+  return SESSION_COOKIE + "=" + value + cookieAttributes(SESSION_TTL_SECONDS);
 }
 
 export function expiredSessionCookieHeader() {
-  return SESSION_COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0";
+  return SESSION_COOKIE + "=" + cookieAttributes(0);
 }
 
 export function verifyPassword(password: string) {
@@ -76,4 +76,9 @@ export function verifyCaptureToken(request: NextRequest) {
 
   if (!configured && process.env.NODE_ENV !== "production") return token === "dev-capture-token";
   return Boolean(configured && token && safeEqual(configured, token));
+}
+
+function cookieAttributes(maxAge: number) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
 }

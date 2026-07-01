@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { NoteSource } from "@/generated/prisma/enums";
 import { isWebAuthenticated } from "@/lib/auth";
 import { createNote, listNotes } from "@/lib/notes";
+import { parseClientDate, parseJsonBody } from "@/lib/request-guards";
+
+const noteSchema = z.object({
+  content: z.string().trim().min(1).max(8000),
+  clientCreatedAt: z
+    .string()
+    .max(80)
+    .refine((value) => !Number.isNaN(new Date(value).getTime()), "Invalid date.")
+    .optional(),
+});
 
 export async function GET(request: NextRequest) {
   if (!isWebAuthenticated(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,14 +33,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   if (!isWebAuthenticated(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = (await request.json()) as { content?: string; clientCreatedAt?: string };
-  const content = body.content?.trim();
-  if (!content) return NextResponse.json({ error: "Content is required." }, { status: 400 });
+  const parsed = await parseJsonBody(request, noteSchema);
+  if (!parsed.ok) return parsed.response;
 
   const note = await createNote({
-    content,
+    content: parsed.data.content,
     source: NoteSource.WEB,
-    clientCreatedAt: body.clientCreatedAt ? new Date(body.clientCreatedAt) : null,
+    clientCreatedAt: parseClientDate(parsed.data.clientCreatedAt),
   });
 
   return NextResponse.json({ note }, { status: 201 });
