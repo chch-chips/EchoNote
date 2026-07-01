@@ -50,3 +50,12 @@
 - `npm run build` 通过。
 - Playwright/Edge 检查过桌面、375px 移动端、平板视口：canvas 与输入框存在，无横向溢出，无控制台错误。
 - 直接调用 `GET /api/notes/[id]` Route Handler：无 cookie 返回 401，有 session 返回 200，并能取回原文。
+
+### 服务器隔离部署
+
+- 在腾讯云 `chips-server` 上安装 Node.js 20.20.0 与 npm 10.8.2。
+- 将仓库克隆到 `/opt/echonote`，生产环境变量写入 `/etc/echonote/echonote.env`，并用符号链接暴露为 `/opt/echonote/.env`。
+- 复用现有 `gewu-postgres` 容器，但只创建 EchoNote 独立数据库 `echo_note` 和独立用户 `echo_note_user`，不重启、不覆盖原容器。
+- 新增 `echonote-web` 与 `echonote-worker` 两个 systemd 服务，分别运行 Next.js standalone Web 和 AI worker。
+- 为避免影响服务器上已有的 `yu-picture-frontend`，EchoNote Web 只监听 `127.0.0.1:3001`，nginx 新增独立 `8081` 入口代理到该端口。
+- 服务器本机 `curl -I http://127.0.0.1:8081/login` 返回 `200 OK`；公网 `101.35.48.157:8081` 仍需在腾讯云安全组放行 `8081/tcp`。
