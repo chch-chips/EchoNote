@@ -48,5 +48,6 @@ next-env.d.ts
 /dev.codex.*.log
 
 # local private data and tool artifacts
+/.deploy-temp/
 /.playwright-mcp/
 /yuque-notes-export.md

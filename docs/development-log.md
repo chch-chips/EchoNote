@@ -101,3 +101,34 @@
 - `ss -ltnp` 显示 `127.0.0.1:3001` 和 `0.0.0.0:8081` 已监听。
 - 本地 `npm run lint` 通过。
 - 本地 `npm run typecheck` 通过。
+
+## 开发记录 003：GitHub Actions 自动部署准备
+
+记录时间：2026-07-02
+
+### 需求
+
+- 在已有手动部署基础上，为 EchoNote 增加 GitHub Actions 自动部署。
+- 用户手动将部署私钥保存到 GitHub Repository Secret，Codex 负责服务器公钥、部署脚本、workflow 和文档。
+
+### 执行任务
+
+- 用户生成 `github-actions-echonote` 专用 SSH key，并将私钥保存到 GitHub Secret `SERVER_SSH_KEY`。
+- 将对应公钥追加到服务器 root 用户 `~/.ssh/authorized_keys`。
+- 在服务器创建 `/opt/echonote/deploy.sh`，封装拉取代码、安装依赖、Prisma 同步、Next.js 构建、静态资源复制、systemd 重启和健康检查流程。
+- 新增 `.github/workflows/deploy.yml`，配置 push 到 `main` 和手动触发时通过 SSH 调用服务器部署脚本。
+- 更新部署文档，记录需要的 Repository Secrets、部署脚本职责和验证状态。
+
+### 当前状态
+
+- GitHub Actions workflow 文件已在本地准备，等待提交/推送后触发。
+- 首次手动执行 `/opt/echonote/deploy.sh` 时卡在 GitHub SSL 连接并导致 SSH 会话超过工具超时，随后服务器短时响应变慢。
+- 重启服务器后，替换为资源友好的部署脚本：按文件变更决定是否执行 `npm ci`、Prisma 同步、Next.js 构建和服务重启。
+- 部署脚本使用 `nice`、`ionice`、`timeout` 和 `flock` 降低资源冲击、限制卡住时间并避免并发部署。
+- 发现重启后 `echonote-worker` 因 `tsx: command not found` 反复重启，原因是生产依赖安装未包含 devDependency；已用 `npm ci --include=dev` 修复，并将 deploy.sh 的依赖安装策略同步为 `--include=dev`。
+- 最终手动验证 `/opt/echonote/deploy.sh` 通过：无运行时代码变更时跳过重任务，只执行 Git 检查和健康检查。
+
+### 后续动作
+
+- 提交并推送 `.github/workflows/deploy.yml` 与文档。
+- 触发一次 GitHub Actions 自动部署并检查运行结果。

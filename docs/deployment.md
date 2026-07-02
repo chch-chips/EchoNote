@@ -220,9 +220,72 @@ ss -ltnp | grep -E ':(3001|8081) '
 curl -I http://127.0.0.1:8081/login
 ```
 
-### 后续自动部署方向
+### GitHub Actions 自动部署
 
-自动部署可以作为额外配置追加：让 GitHub Actions 在 `main` 更新后通过 SSH 登录服务器，执行上面的手动发布命令。建议等 `8081` 公网入口确认可访问后，再把这些命令固化为 `/opt/echonote/deploy.sh`，最后由 GitHub Actions 远程调用该脚本。
+自动部署使用仓库内的 workflow：
+
+```text
+.github/workflows/deploy.yml
+```
+
+触发条件：
+
+- push 到 `main`
+- 在 GitHub Actions 页面手动运行 `Deploy EchoNote`
+
+GitHub Actions 通过 SSH 登录服务器，执行：
+
+```bash
+/opt/echonote/deploy.sh
+```
+
+仓库需要配置以下 Repository Secrets：
+
+```text
+SERVER_HOST=101.35.48.157
+SERVER_USER=root
+SERVER_PORT=22
+SERVER_SSH_KEY=<github-actions-echonote 私钥完整内容>
+```
+
+服务器端已经添加专用公钥：
+
+```text
+github-actions-echonote
+```
+
+`/opt/echonote/deploy.sh` 的职责：
+
+```bash
+cd /opt/echonote
+git fetch origin main
+git checkout main
+git pull --ff-only origin main
+```
+
+脚本会比较新旧 commit 的文件变更，按需执行重任务：
+
+- `package.json` 或 `package-lock.json` 变化：低优先级执行 `npm ci --include=dev`。
+- `prisma/` 或 `prisma.config.ts` 变化：执行 `db:generate` 和 `db:push`。
+- `src/`、`scripts/`、`public/`、`next.config.*` 等运行时代码变化：低优先级执行 `npm run build`，复制 standalone 静态资源，并重启 `echonote-web` / `echonote-worker`。
+- 仅文档、workflow、`.gitignore` 等非运行时文件变化：跳过依赖安装、Prisma、构建和服务重启，只做健康检查。
+
+为了降低 2GB 服务器压力，脚本使用：
+
+```bash
+nice -n 10
+ionice -c2 -n7
+timeout
+flock
+```
+
+分别用于降低 CPU/IO 优先级、限制卡住时间、避免并发部署。部署日志写入：
+
+```text
+/opt/echonote/deploy.log
+```
+
+2026-07-02 已验证：在仓库无运行时代码变更时，`/opt/echonote/deploy.sh` 会跳过 `npm ci`、`db:push`、`npm run build` 和服务重启，并完成 `echonote-web` / `echonote-worker` / `127.0.0.1:8081/login` 健康检查。
 
 ### 后续 HTTPS 正式方案
 
