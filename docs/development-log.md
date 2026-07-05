@@ -200,3 +200,40 @@
 - 确认服务器上 `git remote -v`、DNS、HTTPS 到 GitHub、凭据/免交互设置是否正常。
 - 给 GitHub Actions 外层 SSH 调用补充显式连接超时和 step 超时，让失败更可诊断。
 - 如需修改 `/opt/echonote/deploy.sh` 或服务器 Git 配置，必须先获得用户明确确认。
+
+## 开发记录 006：自动部署改为 artifact push 模式
+
+记录时间：2026-07-05
+
+### 背景
+
+- GitHub Actions 合并触发部署后，服务器旧部署脚本多次停在 `fetching origin/main`。
+- 腾讯云主机安全同时提示来自海外 GitHub-hosted runner 的 root SSH 登录告警。
+- 旧链路包含两个外部网络动作：GitHub runner SSH 登录服务器，以及服务器再访问 GitHub 拉代码。
+- 服务器到 GitHub 的 HTTPS 链路曾成功过，但存在 `SSL connection timeout`，不适合作为生产部署的稳定依赖。
+
+### 决策
+
+将部署从服务器 pull 模式改为 artifact push 模式：
+
+```text
+GitHub Actions checkout/build/package
+-> scp 上传 release tarball
+-> 服务器解包到 /opt/echonote/releases/<sha>
+-> scripts/install-release.sh 激活 /opt/echonote/current
+```
+
+服务器不再执行 `git fetch` / `git pull` 作为自动部署的一部分。GitHub Actions 负责拉取仓库、安装依赖、类型检查、lint、构建 Next.js standalone 输出并打包 release。
+
+### 执行任务
+
+- 新增 `scripts/install-release.sh`，在服务器 release 目录内执行 `npm ci --include=dev`、`db:generate`、`db:deploy`、静态资源复制、systemd unit 更新、服务重启和健康检查。
+- 重写 `.github/workflows/deploy.yml`，使用 checkout、setup-node、npm ci、typecheck、lint、build、tar、scp 和 SSH activate release。
+- systemd 服务目标从 `/opt/echonote` 迁移为 `/opt/echonote/current`，由 release 脚本在部署时写入。
+- `/opt/echonote/deploy.sh` 保留为旧 pull 模式回退脚本，不再由 GitHub Actions 调用。
+
+### 风险与后续
+
+- GitHub-hosted runner 仍会从动态海外 IP SSH 登录服务器，腾讯云主机安全可能继续告警。
+- 后续更安全的演进是创建低权限 `deploy` 用户，并只允许其重启 `echonote-web` / `echonote-worker`。
+- 也可以考虑 GitHub self-hosted runner 或固定出口 IP runner，进一步减少异常登录告警。

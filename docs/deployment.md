@@ -253,10 +253,22 @@ curl -I http://127.0.0.1:8081/login
 
 除非用户明确要求，Codex 不直接创建 PR、不点击 merge、不推送 `main`。
 
-GitHub Actions 通过 SSH 登录服务器，执行：
+当前自动部署采用 artifact push 模式，不再让服务器执行 `git fetch` 或 `git pull`：
 
-```bash
-/opt/echonote/deploy.sh
+```text
+GitHub Actions checkout
+-> npm ci
+-> npm run db:generate
+-> npm run typecheck
+-> npm run lint
+-> npm run build
+-> 打包 .next/standalone、.next/static、public、src、scripts、prisma 和 package lock
+-> scp 上传 /tmp/echonote-<sha>.tar.gz
+-> SSH 解包到 /opt/echonote/releases/<sha>
+-> scripts/install-release.sh <sha>
+-> 切换 /opt/echonote/current
+-> 重启 echonote-web / echonote-worker
+-> health check
 ```
 
 仓库需要配置以下 Repository Secrets：
@@ -274,23 +286,27 @@ SERVER_SSH_KEY=<github-actions-echonote 私钥完整内容>
 github-actions-echonote
 ```
 
-`/opt/echonote/deploy.sh` 的职责：
+服务器上的 systemd 服务由 `scripts/install-release.sh` 管理，目标路径为：
 
-```bash
-cd /opt/echonote
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
+```text
+/opt/echonote/current
 ```
 
-脚本中的 Git 操作默认单次超时 180 秒，最多重试 3 次，用来缓解服务器到 GitHub 偶发 `SSL connection timeout`。
+release 目录结构：
 
-脚本会比较新旧 commit 的文件变更，按需执行重任务：
+```text
+/opt/echonote/releases/<commit-sha>/
+/opt/echonote/current -> /opt/echonote/releases/<commit-sha>
+```
 
-- `package.json` 或 `package-lock.json` 变化：低优先级执行 `npm ci --include=dev`。
-- `prisma/` 或 `prisma.config.ts` 变化：执行 `db:generate` 和 `db:deploy`。
-- `src/`、`scripts/`、`public/`、`next.config.*` 等运行时代码变化：低优先级执行 `npm run build`，复制 standalone 静态资源，并重启 `echonote-web` / `echonote-worker`。
-- 仅文档、workflow、`.gitignore` 等非运行时文件变化：跳过依赖安装、Prisma、构建和服务重启，只做健康检查。
+服务器激活 release 时仍会执行：
+
+- `npm ci --include=dev`：安装 AI worker 需要的 `tsx` 和运行依赖。
+- `npm run db:generate`：根据服务器生产环境变量生成 Prisma Client。
+- `npm run db:deploy`：应用已提交的 Prisma migrations。
+- 复制 `.next/static` 和 `public` 到 `.next/standalone`。
+- 更新 systemd unit 指向 `/opt/echonote/current`。
+- 重启 `echonote-web` / `echonote-worker` 并检查 `127.0.0.1:8081/login`。
 
 为了降低 2GB 服务器压力，脚本使用：
 
@@ -307,18 +323,24 @@ flock
 /opt/echonote/deploy.log
 ```
 
-2026-07-02 已验证：在仓库无运行时代码变更时，`/opt/echonote/deploy.sh` 会跳过 `npm ci`、Prisma 同步、`npm run build` 和服务重启，并完成 `echonote-web` / `echonote-worker` / `127.0.0.1:8081/login` 健康检查。
+旧的 `/opt/echonote/deploy.sh` 属于服务器 pull 模式，只作为回退脚本保留；新的 GitHub Actions 不再调用它。
 
 ### GitHub Actions 部署失败排查
 
-如果 GitHub Actions 在 `Run deployment script` 步骤失败，并出现：
+新 workflow 的失败点按步骤判断：
+
+- `Checkout` / `Install dependencies` / `Build` 失败：这是 CI 构建问题，先看 GitHub Actions 日志，不会影响服务器当前版本。
+- `Upload release archive` 失败：通常是 GitHub runner 到服务器 SSH/SCP 链路问题，也会触发腾讯云主机安全“异常登录”告警。
+- `Activate release` 失败：代码包已到服务器，继续看 GitHub Actions 日志和服务器 `/opt/echonote/deploy.log`。
+
+旧 pull 模式如果在 `Run deployment script` 步骤失败，并出现：
 
 ```text
 [deploy] fetching origin/main
 Error: Process completed with exit code 124.
 ```
 
-优先判断为服务器侧部署脚本中的命令超时，尤其是 `/opt/echonote/deploy.sh` 里的 `git fetch origin main` 或其外层 `timeout`，而不是 GitHub Actions 顶层 `timeout-minutes: 20`。
+优先判断为服务器侧旧部署脚本中的命令超时，尤其是 `/opt/echonote/deploy.sh` 里的 `git fetch origin main` 或其外层 `timeout`，而不是 GitHub Actions 顶层 `timeout-minutes: 20`。新 artifact workflow 不再执行这一步。
 
 排查顺序：
 
@@ -336,7 +358,7 @@ GIT_TERMINAL_PROMPT=0 timeout 120 git fetch origin main
 4. 如果 `git fetch` 正常，再检查脚本后续的 `npm ci`、`db:deploy`、`npm run build`、systemd 重启和健康检查。
 5. GitHub Actions 外层 SSH 调用应设置 `BatchMode=yes`、`ConnectTimeout`、`ServerAliveInterval`、`ServerAliveCountMax` 和 step 级 `timeout-minutes`，保证失败时可诊断。
 
-不要通过反复重跑或单纯放大 GitHub Actions 总超时时间来掩盖服务器侧卡住的问题。修改 `/opt/echonote/deploy.sh`、服务器 Git 配置、nginx、systemd 或 Tencent Cloud 安全组前，必须再次获得确认。
+不要通过反复重跑或单纯放大 GitHub Actions 总超时时间来掩盖服务器侧卡住的问题。修改服务器 Git 配置、nginx、systemd 或 Tencent Cloud 安全组前，必须再次获得确认。
 
 ### 后续 HTTPS 正式方案
 

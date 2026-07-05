@@ -12,11 +12,22 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to Tencent Cloud
+    name: Build and deploy to Tencent Cloud
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
+
+    env:
+      NODE_VERSION: "20"
+      RELEASE_ID: ${{ github.sha }}
+      RELEASE_ARCHIVE: echonote-${{ github.sha }}.tar.gz
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: "postgresql://echo_note_ci_user:ci-placeholder@127.0.0.1:5432/echo_note_ci?schema=public"
+      APP_PASSWORD: "ci-placeholder"
+      SESSION_SECRET: "ci-placeholder-session-secret"
+      CAPTURE_TOKEN: "ci-placeholder-capture-token"
+      DEEPSEEK_API_KEY: ""
 
     steps:
       - name: Validate required secrets
@@ -32,6 +43,57 @@ jobs:
           test -n "$SERVER_PORT"
           test -n "$SERVER_SSH_KEY"
 
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      - name: Generate Prisma client
+        shell: bash
+        run: npm run db:generate
+
+      - name: Typecheck
+        shell: bash
+        run: npm run typecheck
+
+      - name: Lint
+        shell: bash
+        run: npm run lint
+
+      - name: Build
+        shell: bash
+        run: npm run build
+
+      - name: Package release
+        shell: bash
+        run: |
+          mkdir -p .release
+          tar -czf ".release/$RELEASE_ARCHIVE" \
+            .next/standalone \
+            .next/static \
+            public \
+            prisma \
+            scripts \
+            src \
+            package.json \
+            package-lock.json \
+            prisma.config.ts \
+            next.config.ts \
+            postcss.config.mjs \
+            tsconfig.json \
+            README.md \
+            AGENTS.md \
+            docs
+          sha256sum ".release/$RELEASE_ARCHIVE" > ".release/$RELEASE_ARCHIVE.sha256"
+
       - name: Configure SSH
         shell: bash
         env:
@@ -45,16 +107,31 @@ jobs:
           chmod 600 ~/.ssh/echonote_deploy_key
           ssh-keyscan -T 10 -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      - name: Run deployment script
+      - name: Upload release archive
         shell: bash
-        timeout-minutes: 15
+        timeout-minutes: 10
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          GIT_TERMINAL_PROMPT: 0
         run: |
-          timeout 900 ssh \
+          scp \
+            -i ~/.ssh/echonote_deploy_key \
+            -P "$SERVER_PORT" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            ".release/$RELEASE_ARCHIVE" \
+            "$SERVER_USER@$SERVER_HOST:/tmp/$RELEASE_ARCHIVE"
+
+      - name: Activate release
+        shell: bash
+        timeout-minutes: 20
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          ssh \
             -i ~/.ssh/echonote_deploy_key \
             -p "$SERVER_PORT" \
             -o BatchMode=yes \
@@ -62,4 +139,18 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
             "$SERVER_USER@$SERVER_HOST" \
-            "/opt/echonote/deploy.sh"
+            "RELEASE_ID='$RELEASE_ID' RELEASE_ARCHIVE='/tmp/$RELEASE_ARCHIVE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          case "$RELEASE_ID" in
+            ""|*/*|*..*)
+              echo "invalid release id: $RELEASE_ID"
+              exit 1
+              ;;
+          esac
+          release_dir="/opt/echonote/releases/$RELEASE_ID"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          tar -xzf "$RELEASE_ARCHIVE" -C "$release_dir"
+          bash "$release_dir/scripts/install-release.sh" "$RELEASE_ID"
+          rm -f "$RELEASE_ARCHIVE"
+          REMOTE
