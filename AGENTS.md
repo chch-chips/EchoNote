@@ -10,5 +10,7 @@ This version has breaking changes. Read the relevant guide in `node_modules/next
 - Use UI/UX Pro Max before changing visible UI.
 - Do not commit `.env`, secrets, database passwords, API keys, or private server material.
 - Do not mutate the Tencent Cloud server without explicit confirmation.
+- Local development uses the isolated dev database `echo_note_dev` via SSH tunnel `127.0.0.1:15432`; do not point local `.env` at production `echo_note`.
+- Production database changes use committed Prisma migrations and `npm run db:deploy`; `db:push` is not a routine post-launch workflow.
 - Prefer mobile-first UI. Test 375px, tablet, and desktop layouts before delivery.
 - Keep EchoNote private-first: fast capture matters more than management features.

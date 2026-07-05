@@ -115,13 +115,14 @@ V1 会自动 upsert 一个 `owner@echonote.local` 作为唯一使用者。保留
 - `source`：来源枚举，当前包括 `WEB`、`WECHAT_CC_CONNECT`、`API`、`IMPORT`。
 - `rawMessage`：外部入口原始消息，比如带 `#` 的微信文本。
 - `clientCreatedAt`：客户端提供的时间，用来保留外部发送时间。
+- `contentUpdatedAt`：用户编辑正文的时间；从未编辑过的小记显示时回退到 `createdAt`。
 - `aiStatus`：AI 状态机，`PENDING -> PROCESSING -> DONE`，失败时进入 `FAILED`。
 - `aiError`：AI 失败或 worker 恢复旧任务时写入的说明。
 - `createdAt` / `updatedAt`：数据库写入和更新时间；worker 用 `updatedAt` 判断旧 `PROCESSING` 是否超时。
 - `analysis`：与 `NoteAiAnalysis` 的一对一关系。
 - `fragments`：与 `MemoryFragment` 的一对多关系。
 
-索引：`createdAt`、`source`、`aiStatus`、`userId + createdAt`，分别服务历史排序、来源筛选、worker 领取和用户时间线查询。
+索引：`createdAt`、`source`、`aiStatus`、`userId + createdAt`、`contentUpdatedAt`，分别服务历史排序、来源筛选、worker 领取、用户时间线查询和按更新时间排序。
 
 ### NoteAiAnalysis
 
@@ -216,6 +217,7 @@ Web 页面保存小记。要求网页登录 session。接口只写入原始 `Not
 - `source`：按来源筛选。
 - `take`：分页大小，最大 250。
 - `cursor`：游标分页。
+- `sort`：排序方式，`created` 按创建时间倒序，`updated` 按 `COALESCE(contentUpdatedAt, createdAt)` 倒序。
 
 当前搜索使用 PostgreSQL `contains`，不是全文索引。后续数据量上来后可以增强为中文全文搜索或向量检索。
 
@@ -233,6 +235,8 @@ Web 页面保存小记。要求网页登录 session。接口只写入原始 `Not
     "source": "WEB",
     "aiStatus": "DONE",
     "createdAt": "...",
+    "contentUpdatedAt": null,
+    "displayUpdatedAt": "...",
     "clientCreatedAt": null,
     "analysis": {
       "summary": "...",
@@ -243,6 +247,15 @@ Web 页面保存小记。要求网页登录 session。接口只写入原始 `Not
   }
 }
 ```
+
+### `PATCH /api/notes/[id]`
+
+登录后编辑单条小记正文。接口会 trim 正文，要求长度 1..8000。保存成功后：
+
+1. 更新 `Note.content`。
+2. 设置 `contentUpdatedAt` 为当前修改时间。
+3. 将 `aiStatus` 重置为 `PENDING` 并清空 `aiError`。
+4. 删除旧 `NoteAiAnalysis` 和 `MemoryFragment`，避免旧摘要和旧记忆雨片段继续关联新正文。
 
 ### `POST /api/inlets/agent-capture`
 
@@ -523,24 +536,37 @@ type MemoryRainResponse = {
 ### 登录页
 
 `src/app/login/page.tsx` + `src/components/login-form.tsx`。登录成功后写入 session cookie，并跳回首页。
-## 10. 数据库与服务器连接
+## 10. 数据库、迁移与服务器连接
 
-当前本地开发不安装 PostgreSQL，而是通过 SSH tunnel 连接服务器容器内数据库：
+EchoNote 已经有线上稳定版本，schema 变更必须通过 Prisma migration 管理。本地/dev 使用 `npm run db:migrate` 生成并应用 migration；staging/production 使用 `npm run db:deploy` 应用已经提交的 migration。`prisma db push` 只用于早期原型或一次性本地试验，不作为常规生产流程。
+
+当前已确立的最小企业级环境是 `local-dev + production`：
+
+- local-dev app：本机 `localhost:3000`，运行 `npm run dev`。
+- local-dev database：服务器 PostgreSQL 容器中的 `echo_note_dev`，用户 `echo_note_dev_user`，通过本机 SSH 隧道 `127.0.0.1:15432` 访问。
+- production app：`echonote-web` / `echonote-worker`。
+- production database：`echo_note`，用户 `echo_note_user`。
+
+如果生产库曾经被手工 hotfix，需要补同等 migration。能重复执行的变更优先写成幂等 SQL；不能重复执行时，确认生产库已经具备同等结构后，用 `prisma migrate resolve --applied "<migration-folder>"` 对齐迁移历史。
+
+当前本地开发不安装 PostgreSQL，通过 SSH tunnel 连接服务器容器内 dev 数据库：
 
 ```powershell
 ssh -N -L 15432:127.0.0.1:5432 chips-server
 ```
 
-本地 `.env` 使用：
+本地 `.env` 使用 dev 数据库账号：
 
 ```env
-DATABASE_URL="postgresql://echo_note_user:<password>@127.0.0.1:15432/echo_note?schema=public"
+DATABASE_URL="postgresql://echo_note_dev_user:<password>@127.0.0.1:15432/echo_note_dev?schema=public"
 ```
 
-服务器上现有 `gewu-postgres` 容器保持不动，只在其中创建了 EchoNote 独立数据库和独立用户：
+服务器上现有 `gewu-postgres` 容器保持不动。EchoNote 使用两套数据库和用户：
 
-- 数据库：`echo_note`
-- 用户：`echo_note_user`
+- dev 数据库：`echo_note_dev`
+- dev 用户：`echo_note_dev_user`
+- production 数据库：`echo_note`
+- production 用户：`echo_note_user`
 
 PostgreSQL 仍然只绑定服务器本机地址，不暴露公网。
 
@@ -574,7 +600,8 @@ npm run build        # 生产构建
 npm run lint         # ESLint
 npm run typecheck    # TypeScript 类型检查
 npm run db:generate  # 生成 Prisma Client
-npm run db:push      # 推送 schema 到数据库
+npm run db:migrate   # 本地/dev 生成并应用 Prisma migration
+npm run db:deploy    # staging/production 应用已提交 migration
 npm run worker:ai    # 常驻处理待 AI 分析的小记
 npm run worker:ai:once # 手动处理一批待 AI 分析的小记
 ```

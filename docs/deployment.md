@@ -27,6 +27,12 @@
 
 ## 本地通过 SSH 隧道开发
 
+当前本地开发连接隔离 dev 数据库，不连接生产库：
+
+- dev 数据库：`echo_note_dev`
+- dev 用户：`echo_note_dev_user`
+- 本地隧道：`127.0.0.1:15432`
+
 ```powershell
 ssh -N -L 15432:127.0.0.1:5432 chips-server
 ```
@@ -34,8 +40,10 @@ ssh -N -L 15432:127.0.0.1:5432 chips-server
 本机 `.env` 使用：
 
 ```env
-DATABASE_URL="postgresql://echo_note_user:<password>@127.0.0.1:15432/echo_note?schema=public"
+DATABASE_URL="postgresql://echo_note_dev_user:<password>@127.0.0.1:15432/echo_note_dev?schema=public"
 ```
+
+生产库仍为 `echo_note` / `echo_note_user`，只供服务器上的 `echonote-web` 和 `echonote-worker` 使用。
 
 ## 后续服务器建库计划
 
@@ -115,11 +123,13 @@ taskkill /PID <PID> /T /F
 ssh -N -L 15432:127.0.0.1:5432 chips-server
 ```
 
-新增 `MemoryRainSnapshot` 表后，需要在确认数据库连接安全的前提下执行：
+新增 `MemoryRainSnapshot` 等表结构后，需要在确认数据库连接安全的前提下执行对应 Prisma migration。已上线环境不要再把 `db:push` 当作常规同步方式。
 
 ```powershell
-npm run db:push
+npm run db:migrate
 ```
+
+当前 dev 数据库从空库开始，已经使用 `prisma/migrations/` 中的 baseline 和后续迁移初始化。生产库早于 migration 历史存在，首次生产切换到 migration 流程时，需要先确认 baseline 与生产 schema 等价，再用 `prisma migrate resolve --applied "20260702000000_baseline_schema"` 记录 baseline，避免重复创建既有表。
 
 不要把 AI worker 放进单个 Next.js Route Handler 长循环里；生产部署应使用 systemd、PM2、Docker Compose 或同等进程管理方式分别守护 Web 和 worker。
 
@@ -184,7 +194,7 @@ cd /opt/echonote
 git pull origin main
 npm ci
 npm run db:generate
-npm run db:push
+npm run db:deploy
 npm run build
 mkdir -p .next/standalone/.next
 [ -d public ] && cp -a public .next/standalone/
@@ -194,7 +204,7 @@ systemctl status echonote-web echonote-worker
 curl -I http://127.0.0.1:8081/login
 ```
 
-若只是文案或前端变更且 Prisma schema 未变化，`npm run db:push` 仍可执行；Prisma 会报告数据库已经同步。
+若只是文案或前端变更且 Prisma schema 未变化，可以跳过 `npm run db:deploy`。若 `prisma/migrations/` 有新增迁移，必须先执行 `db:deploy`，再构建和重启服务。
 
 ### 常用运维命令
 
@@ -266,7 +276,7 @@ git pull --ff-only origin main
 脚本会比较新旧 commit 的文件变更，按需执行重任务：
 
 - `package.json` 或 `package-lock.json` 变化：低优先级执行 `npm ci --include=dev`。
-- `prisma/` 或 `prisma.config.ts` 变化：执行 `db:generate` 和 `db:push`。
+- `prisma/` 或 `prisma.config.ts` 变化：执行 `db:generate` 和 `db:deploy`。
 - `src/`、`scripts/`、`public/`、`next.config.*` 等运行时代码变化：低优先级执行 `npm run build`，复制 standalone 静态资源，并重启 `echonote-web` / `echonote-worker`。
 - 仅文档、workflow、`.gitignore` 等非运行时文件变化：跳过依赖安装、Prisma、构建和服务重启，只做健康检查。
 
@@ -285,7 +295,7 @@ flock
 /opt/echonote/deploy.log
 ```
 
-2026-07-02 已验证：在仓库无运行时代码变更时，`/opt/echonote/deploy.sh` 会跳过 `npm ci`、`db:push`、`npm run build` 和服务重启，并完成 `echonote-web` / `echonote-worker` / `127.0.0.1:8081/login` 健康检查。
+2026-07-02 已验证：在仓库无运行时代码变更时，`/opt/echonote/deploy.sh` 会跳过 `npm ci`、Prisma 同步、`npm run build` 和服务重启，并完成 `echonote-web` / `echonote-worker` / `127.0.0.1:8081/login` 健康检查。
 
 ### 后续 HTTPS 正式方案
 
