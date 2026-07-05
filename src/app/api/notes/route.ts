@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     source,
     take: Number(searchParams.get("take") ?? 40),
     cursor: searchParams.get("cursor") ?? undefined,
+    sort: searchParams.get("sort") === "updated" ? "updated" : "created",
   });
 
   return NextResponse.json({ notes });

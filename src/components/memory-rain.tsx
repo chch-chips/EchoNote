@@ -24,6 +24,8 @@ type MemoryNote = {
   source: string;
   aiStatus: string;
   createdAt: string;
+  contentUpdatedAt?: string | null;
+  displayUpdatedAt?: string;
   clientCreatedAt?: string | null;
   analysis?: {
     poeticFragment?: string | null;
@@ -336,8 +338,8 @@ export function MemoryRain() {
       {activeFragment ? (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-end justify-center px-3 pb-3 sm:items-center sm:px-6 sm:pb-0">
           <button type="button" aria-label="关闭小记" className="absolute inset-0 cursor-default bg-black/30 backdrop-blur-[2px]" onClick={closeReveal} />
-          <section className="pointer-events-auto relative w-full max-w-2xl rounded-lg border border-paper/12 bg-ink-soft/88 p-5 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <section className="pointer-events-auto relative flex max-h-[calc(100dvh-24px)] w-full max-w-2xl flex-col rounded-lg border border-paper/12 bg-ink-soft/88 p-5 shadow-[0_32px_100px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:max-h-[min(760px,calc(100dvh-48px))] sm:p-6">
+            <div className="mb-4 flex shrink-0 items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="font-serif text-sm text-amber">Memory</p>
                 <p className="mt-1 line-clamp-2 font-serif text-lg leading-8 text-paper-muted">{activeFragment.text}</p>
@@ -362,8 +364,8 @@ export function MemoryRain() {
             {noteState.status === "error" ? <p className="rounded-lg border border-rose/35 bg-rose/10 p-4 text-sm leading-7 text-paper">{noteState.error}</p> : null}
 
             {noteState.status === "ready" ? (
-              <div>
-                <p className="whitespace-pre-wrap text-base leading-8 text-paper sm:text-lg sm:leading-9">{noteState.note.content}</p>
+              <div className="min-h-0 overflow-y-auto pr-1">
+                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-base leading-8 text-paper sm:text-lg sm:leading-9">{noteState.note.content}</p>
                 {noteState.note.analysis?.summary ? <p className="mt-4 border-l border-amber/50 pl-4 text-sm leading-7 text-paper-muted">{noteState.note.analysis.summary}</p> : null}
                 <div className="mt-5 flex flex-wrap items-center gap-3 text-xs text-paper-muted">
                   <span className="inline-flex items-center gap-2">

@@ -47,6 +47,7 @@ model Note {
   source          NoteSource       @default(WEB)
   rawMessage      String?
   clientCreatedAt DateTime?
+  contentUpdatedAt DateTime?
   aiStatus        AiStatus         @default(PENDING)
   aiError         String?
   createdAt       DateTime         @default(now())
@@ -59,6 +60,7 @@ model Note {
   @@index([source])
   @@index([aiStatus])
   @@index([userId, createdAt])
+  @@index([contentUpdatedAt])
 }
 
 model NoteAiAnalysis {
