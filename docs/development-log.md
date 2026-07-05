@@ -237,3 +237,39 @@ GitHub Actions checkout/build/package
 - GitHub-hosted runner 仍会从动态海外 IP SSH 登录服务器，腾讯云主机安全可能继续告警。
 - 后续更安全的演进是创建低权限 `deploy` 用户，并只允许其重启 `echonote-web` / `echonote-worker`。
 - 也可以考虑 GitHub self-hosted runner 或固定出口 IP runner，进一步减少异常登录告警。
+
+## 开发记录 007：发布上传阶段改为 rsync 增量同步
+
+记录时间：2026-07-05
+
+### 背景
+
+- artifact push workflow 合并到 `main` 后，GitHub Actions 已经能够完成 checkout、依赖安装、Prisma client 生成、typecheck、lint、Next.js build 和发布内容汇总。
+- 新的失败点出现在 `Upload release archive`：`scp` 上传 tarball 运行 10 分钟后被 step 级 `timeout-minutes` 终止。
+- 这说明瓶颈已经不再是服务器执行 `git fetch origin main`，而是 GitHub-hosted runner 到腾讯云服务器之间的 SSH 文件传输链路。
+
+### 决策
+
+将发布上传阶段从单个 tarball 的 `scp` 改为 `rsync` 增量同步：
+
+```text
+GitHub Actions build
+-> rsync .next/standalone、.next/static、public、src、scripts、prisma 和 package lock
+-> /opt/echonote/releases/<sha>
+-> scripts/install-release.sh <sha>
+```
+
+服务器已有 `/usr/bin/rsync`，版本为 `3.2.7`。workflow 在服务器存在 `/opt/echonote/current` 时使用 `--link-dest=/opt/echonote/current`，让新 release 可以复用上一个 release 中未变化的文件，减少重复上传量。
+
+### 执行任务
+
+- 移除 `.github/workflows/deploy.yml` 中的 `.release/*.tar.gz` 打包、`scp` 上传和远端解包步骤。
+- 新增 `Upload release files` 步骤，使用 `rsync -azR --partial --info=stats2,progress2` 上传发布目录。
+- 激活阶段继续调用 `scripts/install-release.sh <sha>`，不再依赖 `/tmp/echonote-<sha>.tar.gz`。
+- 将 `.github/workflows/*.yml` 固定为 LF 换行，避免 Windows 本地编辑影响 CI 文件格式。
+- 增加同 SHA 重跑保护：如果 `/opt/echonote/current` 已经指向目标 release，上传步骤不会删除当前正在运行的 release 目录。
+
+### 后续观察
+
+- 如果 `Upload release files` 仍然超时，优先查看 rsync 日志中的总大小、速度和卡住文件，而不是回到服务器 `git fetch` 排查方向。
+- 腾讯云主机安全仍可能因为 GitHub-hosted runner 的海外动态 IP SSH 登录而告警；这是当前链路的安全告警特征，不等于部署一定失败。
