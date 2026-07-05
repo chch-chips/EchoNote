@@ -132,3 +132,71 @@
 
 - 提交并推送 `.github/workflows/deploy.yml` 与文档。
 - 触发一次 GitHub Actions 自动部署并检查运行结果。
+
+## 开发记录 004：历史页编辑功能与上线后迁移工作流
+
+记录时间：2026-07-05
+
+### 需求
+
+- 在历史页支持编辑已保存的小记正文。
+- 编辑后不能继续展示旧 AI 摘要和旧记忆雨片段。
+- 历史页需要区分创建时间和内容更新时间，并能按更新时间排序。
+- 项目已经上线，数据库变更要从 `db push` 转为 Prisma migration 流程。
+- 解决 Google Fonts 构建时网络依赖导致 `next build` 不稳定的问题。
+
+### 执行任务
+
+- 新增 `src/components/edit-note-button.tsx`，在 `/history` 列表中提供编辑弹窗。
+- 新增 `PATCH /api/notes/[id]`，登录后可更新单条小记正文。
+- `src/lib/notes.ts` 新增更新小记逻辑：写入 `contentUpdatedAt`，重置 `aiStatus=PENDING`，清空 `aiError`，删除旧 `NoteAiAnalysis` 和 `MemoryFragment`。
+- `GET /api/notes` 支持 `sort=created|updated`，历史页增加创建时间/更新时间排序入口。
+- 修复历史页和记忆雨详情弹窗的长内容滚动与关闭按钮可用性。
+- 去掉 `next/font/google` 的构建时字体下载，改用系统字体栈。
+- 为 Prisma 补充 baseline migration 和 `contentUpdatedAt` 幂等迁移，并新增 `npm run db:deploy`。
+- 新增 `docs/development-workflow.md`，记录 local-dev/production 分层、migration 流程、验证和发布规范。
+
+### 完成效果
+
+- 历史页小记可以编辑；保存后原文立即更新。
+- 被编辑的小记会重新进入 AI 待处理队列，旧摘要和旧记忆雨片段不会继续误导用户。
+- 历史页可按创建时间或更新时间查看小记。
+- 构建不再依赖 Google Fonts 网络请求。
+- 生产数据库变更路径明确为已提交 migration + `npm run db:deploy`。
+
+### 验证记录
+
+- `npm run db:generate` 通过。
+- `npm run typecheck` 通过。
+- `npm run lint` 通过。
+- `npm run build` 通过。
+
+### 发布记录
+
+- 本轮代码进入分支 `codex-note-editing-workflow`。
+- 用户在 GitHub 手动创建 PR、审核并合并到 `main`。
+- 合并后触发 GitHub Actions 自动部署，但部署在服务器执行脚本阶段失败，见开发记录 005。
+
+## 开发记录 005：PR 合并后自动部署超时待修
+
+记录时间：2026-07-05
+
+### 现象
+
+- PR 合并到 `main` 后触发 `Deploy EchoNote` GitHub Actions。
+- job `Deploy to Tencent Cloud` 在 `Run deployment script` 步骤失败。
+- 日志最后停在服务器脚本输出：`[deploy] fetching origin/main`。
+- GitHub Actions 返回 `Error: Process completed with exit code 124.`，截图显示该步骤约 1 分 33 秒后结束。
+
+### 初步判断
+
+- 失败发生在服务器 `/opt/echonote/deploy.sh` 执行 `git fetch origin/main` 附近。
+- 这更像服务器到 GitHub 的网络或脚本内 `timeout` 触发，而不是 workflow 顶层 20 分钟超时。
+- 只增加 GitHub Actions 的总超时时间不能解决根因；需要同时检查服务器侧 `git fetch`、`deploy.log` 和远程仓库访问链路。
+
+### 待处理
+
+- 检查服务器 `/opt/echonote/deploy.log` 中 `fetching origin/main` 后的详细错误。
+- 确认服务器上 `git remote -v`、DNS、HTTPS 到 GitHub、凭据/免交互设置是否正常。
+- 给 GitHub Actions 外层 SSH 调用补充显式连接超时和 step 超时，让失败更可诊断。
+- 如需修改 `/opt/echonote/deploy.sh` 或服务器 Git 配置，必须先获得用户明确确认。

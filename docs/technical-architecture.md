@@ -38,6 +38,7 @@ src/
     page.tsx              # 首页捕获台与所有小记入口
   components/
     capture-panel.tsx     # 首页输入与保存交互
+    edit-note-button.tsx   # 历史页编辑弹窗
     login-form.tsx        # 登录表单
     memory-rain.tsx       # Three.js 记忆雨
     recent-notes.tsx      # 旧首页小记列表服务端组件
@@ -531,7 +532,17 @@ type MemoryRainResponse = {
 
 ### 历史页
 
-`src/app/history/page.tsx` 是动态 Server Component。它读取 `q` 参数进行搜索，使用纵向列表展示，不做表格，适合手机阅读。首页右上角“所有小记”入口会导航到这里。
+`src/app/history/page.tsx` 是动态 Server Component。它读取 `q`、`sort` 参数进行搜索和排序，使用纵向列表展示，不做表格，适合手机阅读。首页右上角“所有小记”入口会导航到这里。
+
+历史页当前承担轻量管理能力：
+
+- 按内容搜索小记。
+- 按创建时间或更新时间倒序查看。
+- 展示创建时间、内容更新时间、来源和 AI 状态。
+- 通过 `EditNoteButton` 打开编辑弹窗，保存时调用 `PATCH /api/notes/[id]`。
+- 编辑成功后刷新当前路由，让列表时间和内容保持一致。
+
+编辑弹窗使用 portal 渲染到 `document.body`，避免被列表卡片的滤镜、层叠上下文或 overflow 裁切。长内容在弹窗内部滚动，页面本身不被撑出横向溢出。
 
 ### 登录页
 
@@ -622,4 +633,4 @@ npm run worker:ai:once # 手动处理一批待 AI 分析的小记
 3. 增加 pgvector 或独立 embedding 字段，支持语义召回。
 4. 增加 Playwright 测试，覆盖登录、写入、历史搜索、移动端布局。
 5. 做 PWA manifest 和移动端主屏安装体验。
-6. 将部署从文档预案推进到服务器 Docker Compose 实例。
+6. 将当前 HTTP 临时入口升级为 HTTPS 域名入口，并把 `SESSION_COOKIE_SECURE` 改回 `true`。
