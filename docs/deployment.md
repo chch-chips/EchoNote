@@ -243,6 +243,16 @@ curl -I http://127.0.0.1:8081/login
 - push 到 `main`
 - 在 GitHub Actions 页面手动运行 `Deploy EchoNote`
 
+默认发布协作方式：
+
+1. Codex 在功能分支完成代码、文档、验证和 commit。
+2. 需要发布时，Codex 将功能分支推送到 GitHub，并在交付说明中写清楚变更摘要、验证结果、migration 和部署注意事项。
+3. 用户在 GitHub 页面创建 PR、检查 diff、填写或调整描述。
+4. 用户点击合并 PR。
+5. 合并到 `main` 后，GitHub Actions 自动部署到腾讯云。
+
+除非用户明确要求，Codex 不直接创建 PR、不点击 merge、不推送 `main`。
+
 GitHub Actions 通过 SSH 登录服务器，执行：
 
 ```bash
@@ -273,6 +283,8 @@ git checkout main
 git pull --ff-only origin main
 ```
 
+脚本中的 Git 操作默认单次超时 180 秒，最多重试 3 次，用来缓解服务器到 GitHub 偶发 `SSL connection timeout`。
+
 脚本会比较新旧 commit 的文件变更，按需执行重任务：
 
 - `package.json` 或 `package-lock.json` 变化：低优先级执行 `npm ci --include=dev`。
@@ -296,6 +308,35 @@ flock
 ```
 
 2026-07-02 已验证：在仓库无运行时代码变更时，`/opt/echonote/deploy.sh` 会跳过 `npm ci`、Prisma 同步、`npm run build` 和服务重启，并完成 `echonote-web` / `echonote-worker` / `127.0.0.1:8081/login` 健康检查。
+
+### GitHub Actions 部署失败排查
+
+如果 GitHub Actions 在 `Run deployment script` 步骤失败，并出现：
+
+```text
+[deploy] fetching origin/main
+Error: Process completed with exit code 124.
+```
+
+优先判断为服务器侧部署脚本中的命令超时，尤其是 `/opt/echonote/deploy.sh` 里的 `git fetch origin main` 或其外层 `timeout`，而不是 GitHub Actions 顶层 `timeout-minutes: 20`。
+
+排查顺序：
+
+1. 在 GitHub Actions 日志里确认失败停在哪一行。
+2. SSH 到服务器后查看：
+
+```bash
+tail -n 200 /opt/echonote/deploy.log
+cd /opt/echonote
+git remote -v
+GIT_TERMINAL_PROMPT=0 timeout 120 git fetch origin main
+```
+
+3. 如果 `git fetch` 卡住，继续检查服务器到 GitHub 的 DNS、HTTPS 网络、代理、凭据和远程仓库 URL。
+4. 如果 `git fetch` 正常，再检查脚本后续的 `npm ci`、`db:deploy`、`npm run build`、systemd 重启和健康检查。
+5. GitHub Actions 外层 SSH 调用应设置 `BatchMode=yes`、`ConnectTimeout`、`ServerAliveInterval`、`ServerAliveCountMax` 和 step 级 `timeout-minutes`，保证失败时可诊断。
+
+不要通过反复重跑或单纯放大 GitHub Actions 总超时时间来掩盖服务器侧卡住的问题。修改 `/opt/echonote/deploy.sh`、服务器 Git 配置、nginx、systemd 或 Tencent Cloud 安全组前，必须再次获得确认。
 
 ### 后续 HTTPS 正式方案
 
