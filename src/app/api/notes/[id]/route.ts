@@ -8,7 +8,7 @@ const updateNoteSchema = z.object({
   content: z.string().trim().min(1).max(8000),
 });
 
-type NoteRouteContext = RouteContext<"/api/notes/[id]">;
+type NoteRouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: NextRequest, context: NoteRouteContext) {
   if (!isWebAuthenticated(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
