@@ -262,14 +262,17 @@ GitHub Actions checkout
 -> npm run typecheck
 -> npm run lint
 -> npm run build
--> 打包 .next/standalone、.next/static、public、src、scripts、prisma 和 package lock
--> scp 上传 /tmp/echonote-<sha>.tar.gz
--> SSH 解包到 /opt/echonote/releases/<sha>
+-> 汇总 .next/standalone、.next/static、public、src、scripts、prisma 和 package lock
+-> rsync 增量上传到 /opt/echonote/releases/<sha>
 -> scripts/install-release.sh <sha>
 -> 切换 /opt/echonote/current
 -> 重启 echonote-web / echonote-worker
 -> health check
 ```
+
+上传阶段使用 `rsync -azR --partial`，并在服务器已有 `/opt/echonote/current` 时使用 `--link-dest=/opt/echonote/current` 作为基准。这样不再通过 `scp` 传输单个 tarball，重复发布时也尽量只传输变化文件，降低 GitHub-hosted runner 到腾讯云之间网络波动造成的超时概率。
+
+如果手动重跑同一个已经激活过的 commit，workflow 会先检查 `/opt/echonote/current` 是否已经指向该 release；若已经指向，则不会删除当前 release 目录，只会进入后续激活脚本做服务刷新。
 
 仓库需要配置以下 Repository Secrets：
 
@@ -330,7 +333,7 @@ flock
 新 workflow 的失败点按步骤判断：
 
 - `Checkout` / `Install dependencies` / `Build` 失败：这是 CI 构建问题，先看 GitHub Actions 日志，不会影响服务器当前版本。
-- `Upload release archive` 失败：通常是 GitHub runner 到服务器 SSH/SCP 链路问题，也会触发腾讯云主机安全“异常登录”告警。
+- `Upload release files` 失败：通常是 GitHub runner 到服务器 SSH/rsync 链路问题，也会触发腾讯云主机安全“异常登录”告警；重点看 rsync 统计、传输速度、是否卡在建立 SSH 连接或某个大文件。
 - `Activate release` 失败：代码包已到服务器，继续看 GitHub Actions 日志和服务器 `/opt/echonote/deploy.log`。
 
 旧 pull 模式如果在 `Run deployment script` 步骤失败，并出现：
