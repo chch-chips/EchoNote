@@ -1,0 +1,46 @@
+name: echonote
+
+services:
+  web:
+    image: ${ECHONOTE_IMAGE:?ECHONOTE_IMAGE is required}
+    container_name: echonote-web
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${ENV_FILE:-/etc/echonote/echonote.env}
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: "127.0.0.1"
+      PORT: "3001"
+    command: ["node", "server.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/login').then((r)=>process.exit(r.status < 500 ? 0 : 1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    image: ${ECHONOTE_IMAGE:?ECHONOTE_IMAGE is required}
+    container_name: echonote-worker
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${ENV_FILE:-/etc/echonote/echonote.env}
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    command: ["npm", "run", "worker:ai"]
+
+  migrate:
+    image: ${ECHONOTE_IMAGE:?ECHONOTE_IMAGE is required}
+    container_name: echonote-migrate
+    restart: "no"
+    network_mode: host
+    env_file:
+      - ${ENV_FILE:-/etc/echonote/echonote.env}
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    command: ["npm", "run", "db:deploy"]
