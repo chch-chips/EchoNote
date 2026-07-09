@@ -555,7 +555,7 @@ EchoNote 已经有线上稳定版本，schema 变更必须通过 Prisma migratio
 
 - local-dev app：本机 `localhost:3000`，运行 `npm run dev`。
 - local-dev database：服务器 PostgreSQL 容器中的 `echo_note_dev`，用户 `echo_note_dev_user`，通过本机 SSH 隧道 `127.0.0.1:15432` 访问。
-- production app：`echonote-web` / `echonote-worker`。
+- production app：`echonote-web` / `echonote-worker`，当前部署链路切换为 Docker Compose 容器运行。
 - production database：`echo_note`，用户 `echo_note_user`。
 
 如果生产库曾经被手工 hotfix，需要补同等 migration。能重复执行的变更优先写成幂等 SQL；不能重复执行时，确认生产库已经具备同等结构后，用 `prisma migrate resolve --applied "<migration-folder>"` 对齐迁移历史。
@@ -580,6 +580,21 @@ DATABASE_URL="postgresql://echo_note_dev_user:<password>@127.0.0.1:15432/echo_no
 - production 用户：`echo_note_user`
 
 PostgreSQL 仍然只绑定服务器本机地址，不暴露公网。
+
+生产容器部署使用同一个 EchoNote 镜像运行两个长期进程：
+
+```text
+echonote-web     -> node server.js
+echonote-worker  -> npm run worker:ai
+```
+
+部署时会先运行一次临时迁移容器：
+
+```text
+echonote-migrate -> npm run db:deploy
+```
+
+Compose 暂时使用 `network_mode: host`。原因是生产 PostgreSQL 仍通过服务器本机 `127.0.0.1:5432` 暴露给应用，nginx 也继续代理 `127.0.0.1:3001`；host network 可以在不重建数据库容器、不改 nginx 入口的前提下完成应用容器化。后续如果要进一步 Docker 原生化，再把 EchoNote 和 PostgreSQL 接入同一个显式 Docker network。
 
 ## 11. 环境变量
 

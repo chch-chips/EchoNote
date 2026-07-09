@@ -253,7 +253,7 @@ curl -I http://127.0.0.1:8081/login
 
 除非用户明确要求，Codex 不直接创建 PR、不点击 merge、不推送 `main`。
 
-当前自动部署采用 artifact push 模式，不再让服务器执行 `git fetch` 或 `git pull`：
+当前自动部署采用容器镜像模式，不再让服务器执行 `git fetch`、`git pull`，也不再从 GitHub-hosted runner 向服务器长时间传输 release 文件：
 
 ```text
 GitHub Actions checkout
@@ -261,22 +261,26 @@ GitHub Actions checkout
 -> npm run db:generate
 -> npm run typecheck
 -> npm run lint
--> npm run build
--> 汇总 .next/standalone、.next/static、public、src、scripts、prisma 和 package lock
--> rsync 增量上传到 /opt/echonote/releases/<sha>
--> scripts/install-release.sh <sha>
--> 切换 /opt/echonote/current
--> 重启 echonote-web / echonote-worker
+-> docker build
+-> docker push ccr.ccs.tencentyun.com/<namespace>/echonote:sha-<git-sha>
+-> 上传小型 docker-compose.prod.yml 与 deploy-container.sh 到服务器
+-> 服务器 docker login 腾讯云镜像仓库
+-> docker compose pull
+-> docker compose run --rm migrate
+-> docker compose up -d web worker
 -> health check
 ```
 
-上传阶段使用 `rsync -azR --partial`，并在服务器已有 `/opt/echonote/current` 时使用 `--link-dest=/opt/echonote/current` 作为基准。这样不再通过 `scp` 传输单个 tarball，重复发布时也尽量只传输变化文件，降低 GitHub-hosted runner 到腾讯云之间网络波动造成的超时概率。
-
-如果手动重跑同一个已经激活过的 commit，workflow 会先检查 `/opt/echonote/current` 是否已经指向该 release；若已经指向，则不会删除当前 release 目录，只会进入后续激活脚本做服务刷新。
+服务器只接收很小的 compose 和部署脚本文件；应用代码、依赖、Next.js standalone 输出、worker 脚本和 Prisma migration 都封装在 Docker 镜像中，通过腾讯云容器镜像仓库分发。
 
 仓库需要配置以下 Repository Secrets：
 
 ```text
+TCR_REGISTRY=ccr.ccs.tencentyun.com
+TCR_NAMESPACE=<腾讯云个人版命名空间>
+TCR_IMAGE=echonote
+TCR_USERNAME=<腾讯云镜像仓库用户名/UIN>
+TCR_PASSWORD=<腾讯云镜像仓库登录密码>
 SERVER_HOST=101.35.48.157
 SERVER_USER=root
 SERVER_PORT=22
@@ -289,79 +293,66 @@ SERVER_SSH_KEY=<github-actions-echonote 私钥完整内容>
 github-actions-echonote
 ```
 
-服务器上的 systemd 服务由 `scripts/install-release.sh` 管理，目标路径为：
+服务器上的容器部署目录为：
 
 ```text
-/opt/echonote/current
+/opt/echonote-container
 ```
 
-release 目录结构：
+该目录由 GitHub Actions 上传并维护以下文件：
 
 ```text
-/opt/echonote/releases/<commit-sha>/
-/opt/echonote/current -> /opt/echonote/releases/<commit-sha>
+/opt/echonote-container/docker-compose.prod.yml
+/opt/echonote-container/deploy-container.sh
+/opt/echonote-container/deploy.log
 ```
 
-服务器激活 release 时仍会执行：
-
-- `npm ci --include=dev`：安装 AI worker 需要的 `tsx` 和运行依赖。
-- `npm run db:generate`：根据服务器生产环境变量生成 Prisma Client。
-- `npm run db:deploy`：应用已提交的 Prisma migrations。
-- 复制 `.next/static` 和 `public` 到 `.next/standalone`。
-- 更新 systemd unit 指向 `/opt/echonote/current`。
-- 重启 `echonote-web` / `echonote-worker` 并检查 `127.0.0.1:8081/login`。
-
-为了降低 2GB 服务器压力，脚本使用：
-
-```bash
-nice -n 10
-ionice -c2 -n7
-timeout
-flock
-```
-
-分别用于降低 CPU/IO 优先级、限制卡住时间、避免并发部署。部署日志写入：
+容器运行结构：
 
 ```text
-/opt/echonote/deploy.log
+echonote-web     -> node server.js
+echonote-worker  -> npm run worker:ai
+echonote-migrate -> npm run db:deploy
 ```
 
-旧的 `/opt/echonote/deploy.sh` 属于服务器 pull 模式，只作为回退脚本保留；新的 GitHub Actions 不再调用它。
+Web 和 worker 使用同一个镜像，但启动命令不同。Compose 使用 `network_mode: host`，目的是复用现有服务器边界：
+
+- nginx 继续代理 `127.0.0.1:3001`。
+- 生产 `.env` 继续使用 `/etc/echonote/echonote.env`。
+- `DATABASE_URL` 中的 `127.0.0.1:5432` 继续指向服务器上已有的 PostgreSQL 容器端口。
+- 不重建、不迁移、不改动现有 `gewu-postgres` 容器。
+
+容器部署首次成功时，`scripts/deploy-container.sh` 会停止并禁用旧的 systemd 服务：
+
+```text
+echonote-web
+echonote-worker
+```
+
+这是为了避免旧 systemd 进程和新容器同时抢占 `3001` 端口。旧的 `/opt/echonote/deploy.sh`、`/opt/echonote/releases/*` 和 systemd unit 可作为短期回退参考保留，但新的 GitHub Actions 不再调用它们。
 
 ### GitHub Actions 部署失败排查
 
 新 workflow 的失败点按步骤判断：
 
-- `Checkout` / `Install dependencies` / `Build` 失败：这是 CI 构建问题，先看 GitHub Actions 日志，不会影响服务器当前版本。
-- `Upload release files` 失败：通常是 GitHub runner 到服务器 SSH/rsync 链路问题，也会触发腾讯云主机安全“异常登录”告警；重点看 rsync 统计、传输速度、是否卡在建立 SSH 连接或某个大文件。
-- `Activate release` 失败：代码包已到服务器，继续看 GitHub Actions 日志和服务器 `/opt/echonote/deploy.log`。
+- `Install dependencies` / `Generate Prisma client` / `Typecheck` / `Lint` 失败：这是 CI 问题，服务器当前版本不受影响。
+- `Build and push container image` 失败：重点检查 Dockerfile、Next.js build、腾讯云镜像仓库凭据和 GitHub runner 到腾讯云 CCR/TCR 的推送链路。
+- `Upload deployment files` 失败：只上传 compose 和部署脚本，文件很小；若失败通常是 SSH 连接或服务器权限问题。
+- `Log in to Tencent Cloud registry on server` 失败：检查服务器 Docker、TCR 用户名/密码和私有仓库权限。
+- `Deploy container release` 失败：继续看 GitHub Actions 日志和服务器 `/opt/echonote-container/deploy.log`。
 
-旧 pull 模式如果在 `Run deployment script` 步骤失败，并出现：
-
-```text
-[deploy] fetching origin/main
-Error: Process completed with exit code 124.
-```
-
-优先判断为服务器侧旧部署脚本中的命令超时，尤其是 `/opt/echonote/deploy.sh` 里的 `git fetch origin main` 或其外层 `timeout`，而不是 GitHub Actions 顶层 `timeout-minutes: 20`。新 artifact workflow 不再执行这一步。
-
-排查顺序：
-
-1. 在 GitHub Actions 日志里确认失败停在哪一行。
-2. SSH 到服务器后查看：
+容器部署失败时，服务器上常用排查命令：
 
 ```bash
-tail -n 200 /opt/echonote/deploy.log
-cd /opt/echonote
-git remote -v
-GIT_TERMINAL_PROMPT=0 timeout 120 git fetch origin main
+tail -n 200 /opt/echonote-container/deploy.log
+docker compose -f /opt/echonote-container/docker-compose.prod.yml ps
+docker logs --tail=200 echonote-web
+docker logs --tail=200 echonote-worker
+docker logs --tail=200 echonote-migrate
+curl -I http://127.0.0.1:8081/login
 ```
 
-3. 如果 `git fetch` 卡住，继续检查服务器到 GitHub 的 DNS、HTTPS 网络、代理、凭据和远程仓库 URL。
-4. 如果 `git fetch` 正常，再检查脚本后续的 `npm ci`、`db:deploy`、`npm run build`、systemd 重启和健康检查。
-5. GitHub Actions 外层 SSH 调用应设置 `BatchMode=yes`、`ConnectTimeout`、`ServerAliveInterval`、`ServerAliveCountMax` 和 step 级 `timeout-minutes`，保证失败时可诊断。
-
-不要通过反复重跑或单纯放大 GitHub Actions 总超时时间来掩盖服务器侧卡住的问题。修改服务器 Git 配置、nginx、systemd 或 Tencent Cloud 安全组前，必须再次获得确认。
+不要再通过反复放大 `scp` / `rsync` / SSH 传输超时时间解决部署问题。新的主路径是镜像构建、镜像推送、服务器拉取镜像和 Docker Compose 激活。
 
 ### 后续 HTTPS 正式方案
 

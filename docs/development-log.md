@@ -273,3 +273,47 @@ GitHub Actions build
 
 - 如果 `Upload release files` 仍然超时，优先查看 rsync 日志中的总大小、速度和卡住文件，而不是回到服务器 `git fetch` 排查方向。
 - 腾讯云主机安全仍可能因为 GitHub-hosted runner 的海外动态 IP SSH 登录而告警；这是当前链路的安全告警特征，不等于部署一定失败。
+
+## 开发记录 008：部署链路切换为腾讯云容器镜像 + Docker Compose
+
+记录时间：2026-07-09
+
+### 背景
+
+- rsync 增量同步方案在 GitHub Actions 中仍然失败，日志显示上传速度约 `47kB/s`，20 分钟后 `Upload release files` 超时。
+- 这说明问题不是单个上传命令参数，而是 GitHub-hosted runner 到腾讯云服务器之间的长时间 SSH 文件传输链路不适合作为生产部署主路径。
+- 用户已在腾讯云容器镜像服务个人版创建 EchoNote 私有镜像仓库。
+
+### 决策
+
+将部署链路改为容器镜像发布：
+
+```text
+GitHub Actions
+-> docker build
+-> docker push ccr.ccs.tencentyun.com/<namespace>/echonote:sha-<git-sha>
+-> 服务器 docker compose pull
+-> docker compose run --rm migrate
+-> docker compose up -d web worker
+```
+
+GitHub Actions 不再向服务器上传完整 release 目录。服务器只接收很小的 `docker-compose.prod.yml` 和 `scripts/deploy-container.sh`，应用代码、依赖、Next.js standalone 输出、worker 脚本和 Prisma migrations 都封装在镜像里。
+
+### 执行任务
+
+- 新增 `Dockerfile`，使用 Next.js `output: "standalone"` 构建生产镜像，并复制 `public` 与 `.next/static` 到运行镜像。
+- 新增 `.dockerignore`，排除 `.env`、`.git`、`.next`、`node_modules`、日志和本地临时文件。
+- 新增 `docker-compose.prod.yml`，用同一个镜像运行 `web`、`worker` 和临时 `migrate` 服务。
+- 新增 `scripts/deploy-container.sh`，负责服务器侧拉取镜像、运行 migration、启动容器和健康检查。
+- 重写 `.github/workflows/deploy.yml`：PR 只做 CI + Docker build；`main` 才推送腾讯云镜像并触发服务器部署。
+
+### 关键设计
+
+- 生产容器暂时使用 `network_mode: host`，以复用现有 `127.0.0.1:5432` PostgreSQL 暴露方式和 `127.0.0.1:3001` nginx 代理入口。
+- 首次容器部署会停止并禁用旧 `echonote-web` / `echonote-worker` systemd 服务，避免与容器抢占端口。
+- 镜像 tag 使用不可变的 `sha-<短 git sha>`，同时更新移动 tag `main`。服务器部署使用 SHA tag。
+
+### 后续观察
+
+- 如果 GitHub Actions 推送腾讯云镜像仍然慢，下一步不再回到 SSH 文件传输，而是把构建也迁到腾讯云侧 runner 或 CODING DevOps。
+- 镜像仓库需要定期清理旧 `sha-*` tag，保留最近 5-10 个版本用于回滚即可。
