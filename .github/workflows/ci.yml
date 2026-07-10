@@ -1,0 +1,91 @@
+name: EchoNote CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify application and container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      NODE_VERSION: "20"
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: "postgresql://echo_note_ci_user:ci-placeholder@127.0.0.1:5432/echo_note_ci?schema=public"
+      APP_PASSWORD: "ci-placeholder"
+      SESSION_SECRET: "ci-placeholder-session-secret"
+      CAPTURE_TOKEN: "ci-placeholder-capture-token"
+      DEEPSEEK_API_KEY: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build worker
+        run: npm run build:worker
+
+      - name: Build Next.js application
+        run: npm run build
+
+      - name: Build runtime container
+        run: docker build --target runtime --build-arg VCS_REF="$GITHUB_SHA" -t echonote:ci .
+
+      - name: Build migration container
+        run: docker build --target migrate -t echonote-migrate:ci .
+
+  sync-cnb:
+    name: Sync verified main to CNB
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CNB_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      CNB_REPO_URL: ${{ vars.CNB_REPO_URL }}
+      CNB_ACCESS_TOKEN: ${{ secrets.CNB_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Push verified main to CNB mirror
+        shell: bash
+        run: |
+          test -n "$CNB_REPO_URL"
+          test -n "$CNB_ACCESS_TOKEN"
+          basic_auth="$(printf 'cnb:%s' "$CNB_ACCESS_TOKEN" | base64 -w0)"
+          echo "::add-mask::$basic_auth"
+          git -c http.extraheader="Authorization: Basic $basic_auth" \
+            push "$CNB_REPO_URL" HEAD:main

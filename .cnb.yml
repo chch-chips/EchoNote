@@ -1,0 +1,59 @@
+main:
+  push:
+    build-and-deploy-production:
+      services:
+        - docker
+      env:
+        ECHONOTE_SECRET_ROOT: https://cnb.cool/chch_chips/echonote-secrets/-/blob/main
+      imports:
+        - $ECHONOTE_SECRET_ROOT/registry.yml
+      lock:
+        key: echonote-production
+        expires: 3600
+        wait: true
+        timeout: 600
+      stages:
+        - name: Log in to Tencent Cloud TCR
+          script: echo "$TCR_PASSWORD" | docker login "$TCR_REGISTRY" -u "$TCR_USERNAME" --password-stdin
+
+        - name: Build runtime image
+          script: |
+            docker build \
+              --pull \
+              --target runtime \
+              --build-arg VCS_REF="$CNB_COMMIT" \
+              -t "$TCR_IMAGE_REPOSITORY:sha-$CNB_COMMIT" \
+              .
+
+        - name: Build migration image
+          script: |
+            docker build \
+              --target migrate \
+              -t "$TCR_IMAGE_REPOSITORY:migrate-sha-$CNB_COMMIT" \
+              .
+
+        - name: Push immutable images
+          retry: 1
+          script: |
+            docker push "$TCR_IMAGE_REPOSITORY:sha-$CNB_COMMIT"
+            docker push "$TCR_IMAGE_REPOSITORY:migrate-sha-$CNB_COMMIT"
+
+        - name: Deploy healthy image to CVM
+          if: |
+            [ "$DEPLOY_ENABLED" = "true" ]
+          imports:
+            - $ECHONOTE_SECRET_ROOT/deploy.yml
+          image: cnbcool/ssh
+          settings:
+            host: $REMOTE_HOST
+            port: $REMOTE_PORT
+            username: $REMOTE_USERNAME
+            key: $REMOTE_KEY
+            timeout: 30s
+            command_timeout: 20m
+            script_stop: true
+            script: |
+              sudo /usr/local/sbin/echonote-deploy \
+                "$TCR_IMAGE_REPOSITORY:sha-$CNB_COMMIT" \
+                "$TCR_IMAGE_REPOSITORY:migrate-sha-$CNB_COMMIT" \
+                "$CNB_COMMIT"

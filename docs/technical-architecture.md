@@ -555,7 +555,7 @@ EchoNote 已经有线上稳定版本，schema 变更必须通过 Prisma migratio
 
 - local-dev app：本机 `localhost:3000`，运行 `npm run dev`。
 - local-dev database：服务器 PostgreSQL 容器中的 `echo_note_dev`，用户 `echo_note_dev_user`，通过本机 SSH 隧道 `127.0.0.1:15432` 访问。
-- production app：`echonote-web` / `echonote-worker`，当前部署链路切换为 Docker Compose 容器运行。
+- production app：`echonote-web` / `echonote-worker`。当前稳定版本仍由 systemd 守护；目标发布链路为 GitHub CI + CNB 构建 + TCR + Docker Compose，完成 POC 和回滚演练后再切换。
 - production database：`echo_note`，用户 `echo_note_user`。
 
 如果生产库曾经被手工 hotfix，需要补同等 migration。能重复执行的变更优先写成幂等 SQL；不能重复执行时，确认生产库已经具备同等结构后，用 `prisma migrate resolve --applied "<migration-folder>"` 对齐迁移历史。
@@ -581,18 +581,20 @@ DATABASE_URL="postgresql://echo_note_dev_user:<password>@127.0.0.1:15432/echo_no
 
 PostgreSQL 仍然只绑定服务器本机地址，不暴露公网。
 
-生产容器部署使用同一个 EchoNote 镜像运行两个长期进程：
+目标生产容器使用精简 runtime 镜像运行两个长期进程：
 
 ```text
 echonote-web     -> node server.js
-echonote-worker  -> npm run worker:ai
+echonote-worker  -> node worker/process-ai.mjs
 ```
 
-部署时会先运行一次临时迁移容器：
+AI worker 在构建阶段由 esbuild 打包成单个 ESM bundle，生产环境不再携带 TypeScript 源码、`tsx` 和 esbuild 常驻进程。Prisma migration 使用独立 target 生成的短生命周期镜像：
 
 ```text
 echonote-migrate -> npm run db:deploy
 ```
+
+CNB 为 runtime 和 migrate 镜像分别生成包含完整 commit SHA 的不可变 tag。部署脚本在旧版本仍在线时完成拉取和 migration，只有通过前置检查后才切换进程；健康检查失败时恢复上一容器镜像，首次迁移期则恢复原 systemd 服务。
 
 Compose 暂时使用 `network_mode: host`。原因是生产 PostgreSQL 仍通过服务器本机 `127.0.0.1:5432` 暴露给应用，nginx 也继续代理 `127.0.0.1:3001`；host network 可以在不重建数据库容器、不改 nginx 入口的前提下完成应用容器化。后续如果要进一步 Docker 原生化，再把 EchoNote 和 PostgreSQL 接入同一个显式 Docker network。
 
