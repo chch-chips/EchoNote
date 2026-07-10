@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
@@ -6,9 +6,9 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
-FROM node:20-bookworm-slim AS builder
+FROM deps AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -18,31 +18,39 @@ ENV SESSION_SECRET="ci-placeholder-session-secret"
 ENV CAPTURE_TOKEN="ci-placeholder-capture-token"
 ENV DEEPSEEK_API_KEY=""
 
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN npm run db:generate
-RUN npm run build
+RUN npm run db:generate \
+  && npm run build:worker \
+  && npm run build
 
-FROM node:20-bookworm-slim AS runner
+# This target is used only as a short-lived Prisma migration job. Keeping it
+# separate prevents build tools and the Prisma CLI from entering the app image.
+FROM deps AS migrate
 WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+
+CMD ["npm", "run", "db:deploy"]
+
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+
+ARG VCS_REF="unknown"
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/package-lock.json ./package-lock.json
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/src ./src
-COPY --from=deps /app/node_modules ./node_modules
+LABEL org.opencontainers.image.revision="$VCS_REF"
 
-RUN chown -R node:node /app
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/dist/worker/process-ai.mjs ./worker/process-ai.mjs
+
 USER node
 
 EXPOSE 3000

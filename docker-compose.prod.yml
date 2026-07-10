@@ -31,10 +31,10 @@ services:
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
-    command: ["npm", "run", "worker:ai"]
+    command: ["node", "worker/process-ai.mjs"]
 
   migrate:
-    image: ${ECHONOTE_IMAGE:?ECHONOTE_IMAGE is required}
+    image: ${ECHONOTE_MIGRATE_IMAGE:?ECHONOTE_MIGRATE_IMAGE is required}
     container_name: echonote-migrate
     restart: "no"
     network_mode: host

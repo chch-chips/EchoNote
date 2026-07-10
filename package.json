@@ -6,6 +6,7 @@
     "dev": "next dev",
     "dev:all": "node scripts/dev-all.mjs",
     "build": "next build",
+    "build:worker": "esbuild scripts/process-ai.ts --bundle --platform=node --format=esm --target=node20 --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/worker/process-ai.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -15,6 +16,7 @@
     "db:push": "prisma db push",
     "worker:ai": "tsx scripts/process-ai.ts",
     "worker:ai:once": "tsx scripts/process-ai.ts --once",
+    "worker:ai:prod": "node dist/worker/process-ai.mjs",
     "import:yuque": "tsx scripts/import-yuque-notes.ts"
   },
   "dependencies": {
@@ -37,6 +39,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.0",
+    "esbuild": "^0.25.12",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "prisma": "^7.8.0",

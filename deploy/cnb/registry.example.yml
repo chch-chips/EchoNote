@@ -1,0 +1,17 @@
+# Copy this file to registry.yml in a private CNB KeyStore named
+# echonote-secrets. Replace every placeholder before enabling the pipeline.
+allow_slugs:
+  - chch_chips/echonote
+allow_events:
+  - push
+allow_branches:
+  - main
+
+TCR_REGISTRY: ccr.ccs.tencentyun.com
+TCR_IMAGE_REPOSITORY: ccr.ccs.tencentyun.com/your-namespace/echonote
+TCR_USERNAME: replace-with-tcr-username
+TCR_PASSWORD: replace-with-tcr-password
+
+# Keep false for the first build-only proof of concept. Change to true only
+# after the server bootstrap and rollback drill have both succeeded.
+DEPLOY_ENABLED: "false"

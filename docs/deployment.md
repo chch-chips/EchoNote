@@ -206,6 +206,59 @@ curl -I http://127.0.0.1:8081/login
 
 若只是文案或前端变更且 Prisma schema 未变化，可以跳过 `npm run db:deploy`。若 `prisma/migrations/` 有新增迁移，必须先执行 `db:deploy`，再构建和重启服务。
 
+### Codex 直连 systemd 发布
+
+这是当前可用的人工发布路径：用户明确允许后，由 Codex 通过 SSH 直连 `chips-server`，沿用服务器现有 `/opt/echonote` 工作目录和 `echonote-web` / `echonote-worker` systemd 服务完成发布。它不使用容器化脚本，不停止或禁用旧 systemd 服务，也不触发 GitHub Actions。
+
+适用场景：
+
+- 用户想先把当前 `origin/main` 版本发布到服务器，而不是继续推进自动部署链路。
+- 变更已经在 GitHub 合并到 `main`，或用户明确指定要发布的提交。
+- 需要保守沿用当前生产运行方式，避免切换到尚未确认的 Docker Compose / 容器镜像路径。
+
+执行边界：
+
+- 发布前必须由用户明确确认，因为该操作会修改生产服务器、构建生产包并重启服务。
+- 默认发布 `origin/main`。如果要发布其他分支或特定 commit，必须先让用户明确指定。
+- 不执行 `scripts/deploy-container.sh`。
+- 不停止、不禁用 `echonote-web` / `echonote-worker` 之外的服务。
+- 只有当 `prisma/migrations/` 有新增迁移，或用户明确要求时，才执行 `npm run db:deploy`。
+- 不打印 `.env`、数据库密码、API key 或其他 secret。
+
+发布前只读确认：
+
+```powershell
+ssh chips-server "hostname; cd /opt/echonote && git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && git status --short && systemctl is-active echonote-web echonote-worker"
+git diff --name-status <server-current-commit>..origin/main -- prisma prisma.config.ts package.json package-lock.json src
+```
+
+常规发布命令：
+
+```bash
+cd /opt/echonote
+git pull --ff-only origin main
+npm run db:generate
+
+# 仅当 prisma/migrations/ 有新增迁移时执行
+npm run db:deploy
+
+npm run build
+mkdir -p .next/standalone/.next
+[ -d public ] && cp -a public .next/standalone/
+cp -a .next/static .next/standalone/.next/
+systemctl restart echonote-web echonote-worker
+systemctl is-active echonote-web echonote-worker
+curl -fsS -I --connect-timeout 10 http://127.0.0.1:8081/login
+```
+
+发布后验证：
+
+```powershell
+Invoke-WebRequest -Uri http://101.35.48.157:8081/login -UseBasicParsing -TimeoutSec 10
+```
+
+2026-07-09 验证记录：Codex 使用该路径将服务器 `/opt/echonote` 更新到 `main@4f50d2f`，执行 `npm run db:generate`、`npm run build`、同步 standalone 静态资源并重启 `echonote-web` / `echonote-worker`。服务器本机 `http://127.0.0.1:8081/login` 和公网 `http://101.35.48.157:8081/login` 均返回 `200 OK`。
+
 ### 常用运维命令
 
 查看日志：
@@ -230,30 +283,57 @@ ss -ltnp | grep -E ':(3001|8081) '
 curl -I http://127.0.0.1:8081/login
 ```
 
-### GitHub Actions 自动部署
+### 目标自动部署：GitHub CI + CNB + TCR + CVM
 
-自动部署使用仓库内的 workflow：
+2026-07-10 用户确认采用零新增服务器方案。GitHub Actions 只做 CI，不再持有 TCR 密码、生产 SSH 私钥或直接执行生产部署。
+
+目标链路：
 
 ```text
-.github/workflows/deploy.yml
+feature branch -> GitHub PR -> GitHub Actions CI
+-> 用户合并 main
+-> GitHub 同步已验证 Git 数据到 CNB
+-> CNB 构建 runtime/migrate 不可变镜像
+-> CNB 推送 TCR 个人版
+-> 受限 echonote-deploy 用户调用 root-owned 部署脚本
+-> pull -> migrate -> switch -> health check -> rollback on failure
 ```
 
-触发条件：
+仓库文件：
 
-- push 到 `main`
-- 在 GitHub Actions 页面手动运行 `Deploy EchoNote`
+- `.github/workflows/ci.yml`：CI 与可开关的 CNB 源码同步。
+- `.cnb.yml`：CNB build/push/deploy Pipeline as Code。
+- `Dockerfile`：`runtime` 与 `migrate` targets。
+- `docker-compose.prod.yml`：Web、worker 和临时 migration 服务。
+- `scripts/deploy-cnb.sh`：部署、健康检查与自动恢复。
+- `scripts/bootstrap-cnb-deploy.sh`：一次性安装受限部署边界，不切换运行服务。
+- `docs/cnb-setup.md`：用户开通与验收步骤。
 
-默认发布协作方式：
+首次 CNB build-only POC 和回滚演练完成前，KeyStore 必须保持 `DEPLOY_ENABLED=false`，生产继续运行现有 systemd 服务。Codex 直连 systemd 发布仍可作为迁移期人工回退路径，但每次都需要用户明确确认。
 
-1. Codex 在功能分支完成代码、文档、验证和 commit。
-2. 需要发布时，Codex 将功能分支推送到 GitHub，并在交付说明中写清楚变更摘要、验证结果、migration 和部署注意事项。
-3. 用户在 GitHub 页面创建 PR、检查 diff、填写或调整描述。
-4. 用户点击合并 PR。
-5. 合并到 `main` 后，GitHub Actions 自动部署到腾讯云。
+### 历史失败与 2026-07-10 新决策
 
-除非用户明确要求，Codex 不直接创建 PR、不点击 merge、不推送 `main`。
+截至 2026-07-09，自动部署链路仍处于待推进状态，不要把当前容器化方案视为已经确认的生产发布路径。已经尝试过的方向如下：
 
-当前自动部署采用容器镜像模式，不再让服务器执行 `git fetch`、`git pull`，也不再从 GitHub-hosted runner 向服务器长时间传输 release 文件：
+1. 服务器 pull 模式：服务器执行 `git fetch` / `git pull`，在 `fetching origin/main` 附近多次超时。
+2. artifact push 模式：GitHub-hosted runner 通过 `scp` / `rsync` 向服务器传 release 文件，上传链路超时。
+3. 容器镜像模式：GitHub-hosted runner 构建 Docker 镜像并推送到腾讯云 CCR/TCR，`Build and push container image` 在推送镜像层时 35 分钟超时。
+
+这些失败共同指向同一个事实：GitHub-hosted runner 到腾讯云中国区的长时间大文件/镜像传输链路不稳定。继续单纯增加 `timeout-minutes`、反复 rerun、或在 `scp` / `rsync` / `docker push` 参数上打补丁，不是当前推荐方向。
+
+新链路完成 POC 前，生产服务器仍不要执行以下动作，除非用户重新明确确认：
+
+- 不安装或注册 GitHub self-hosted runner。
+- 不停止、不禁用旧的 `echonote-web` / `echonote-worker` systemd 服务。
+- 不执行旧的 `scripts/deploy-container.sh`（该文件已经由安全的新脚本替换）。
+- 不在健康检查和回滚演练前切换到 Docker Compose。
+- 不重跑会实际部署或推送大镜像的 GitHub Actions。
+
+2026-07-10 已确定：不购买新服务器、不使用生产机 self-hosted runner、不新购已进入退市周期的 CODING DevOps。使用其下一代 CNB 社区版免费额度，在腾讯云侧构建并推送镜像；现有 2GB CVM 只负责运行。worker 改为构建后的 JavaScript bundle，runtime 镜像不再复制完整 `node_modules`。
+
+下面的旧 GitHub-hosted runner 容器方案只作为失败历史保留，不得恢复为生产路径。
+
+历史容器镜像流程：
 
 ```text
 GitHub Actions checkout
@@ -273,19 +353,7 @@ GitHub Actions checkout
 
 服务器只接收很小的 compose 和部署脚本文件；应用代码、依赖、Next.js standalone 输出、worker 脚本和 Prisma migration 都封装在 Docker 镜像中，通过腾讯云容器镜像仓库分发。
 
-仓库需要配置以下 Repository Secrets：
-
-```text
-TCR_REGISTRY=ccr.ccs.tencentyun.com
-TCR_NAMESPACE=<腾讯云个人版命名空间>
-TCR_IMAGE=echonote
-TCR_USERNAME=<腾讯云镜像仓库用户名/UIN>
-TCR_PASSWORD=<腾讯云镜像仓库登录密码>
-SERVER_HOST=101.35.48.157
-SERVER_USER=root
-SERVER_PORT=22
-SERVER_SSH_KEY=<github-actions-echonote 私钥完整内容>
-```
+旧方案曾要求 GitHub Repository Secrets 保存 TCR 密码和生产 root SSH 私钥；新方案禁止这样做。GitHub 只保存可撤销的 CNB 镜像仓库写入 token，TCR 与受限 CVM 凭据只放 CNB KeyStore。
 
 服务器端已经添加专用公钥：
 
@@ -331,9 +399,9 @@ echonote-worker
 
 这是为了避免旧 systemd 进程和新容器同时抢占 `3001` 端口。旧的 `/opt/echonote/deploy.sh`、`/opt/echonote/releases/*` 和 systemd unit 可作为短期回退参考保留，但新的 GitHub Actions 不再调用它们。
 
-### GitHub Actions 部署失败排查
+### 历史 GitHub Actions CD 失败排查（已停用）
 
-新 workflow 的失败点按步骤判断：
+以下内容只用于理解 2026-07-09 的失败记录，不再作为当前操作手册：
 
 - `Install dependencies` / `Generate Prisma client` / `Typecheck` / `Lint` 失败：这是 CI 问题，服务器当前版本不受影响。
 - `Build and push container image` 失败：重点检查 Dockerfile、Next.js build、腾讯云镜像仓库凭据和 GitHub runner 到腾讯云 CCR/TCR 的推送链路。
@@ -352,7 +420,7 @@ docker logs --tail=200 echonote-migrate
 curl -I http://127.0.0.1:8081/login
 ```
 
-不要再通过反复放大 `scp` / `rsync` / SSH 传输超时时间解决部署问题。新的主路径是镜像构建、镜像推送、服务器拉取镜像和 Docker Compose 激活。
+不要再通过反复放大 `scp` / `rsync` / SSH 传输超时时间解决部署问题。新的候选路径是镜像构建、镜像推送、服务器拉取镜像和 Docker Compose 激活；但在 2026-07-09 已暂停推进，下一次继续前必须先重新确认执行边界。
 
 ### 后续 HTTPS 正式方案
 

@@ -1,0 +1,18 @@
+# Copy this file to deploy.yml in the same private CNB KeyStore. The private
+# key must belong to the restricted echonote-deploy server account.
+allow_slugs:
+  - chch_chips/echonote
+allow_events:
+  - push
+allow_branches:
+  - main
+allow_images:
+  - cnbcool/ssh
+
+REMOTE_HOST: 101.35.48.157
+REMOTE_PORT: "22"
+REMOTE_USERNAME: echonote-deploy
+REMOTE_KEY: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  replace-with-the-dedicated-private-key
+  -----END OPENSSH PRIVATE KEY-----

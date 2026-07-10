@@ -27,7 +27,8 @@ EchoNote 后续默认采用“Codex 准备分支，用户在 GitHub 完成 PR”
 2. 用户明确要求提交时，Codex 使用 git 提交流程创建 commit。
 3. 需要发布时，Codex 可以把分支推送到 GitHub，并在交付说明中写清楚变更摘要、验证结果、迁移/部署注意事项和建议 PR 标题。
 4. 用户自己在 GitHub 创建 PR、检查 diff、填写或调整描述、点击合并。
-5. PR 合并到 `main` 后，GitHub Actions 会触发生产部署；部署失败时先看 Actions 日志和服务器 `/opt/echonote/deploy.log`，不要直接反复合并或重跑。
+5. PR 合并到 `main` 后，GitHub Actions 先完成 CI，再把已验证的 Git 数据同步到 CNB；CNB 在腾讯云侧构建不可变镜像并推送 TCR。
+6. 只有 CNB KeyStore 中 `DEPLOY_ENABLED=true` 时才自动部署生产；失败时先看 CNB 构建记录和 `/var/log/echonote-deploy.log`，不要直接反复合并或重跑。
 
 除非用户单独要求，Codex 不直接创建 PR、点击合并、推送 `main` 或执行生产发布。
 
@@ -227,21 +228,23 @@ UI 改动必须至少检查：
 - 生产备份和回滚方案明确。
 - 用户明确同意发布。
 
-生产发布建议步骤：
+目标生产发布步骤：
 
-```bash
-cd /opt/echonote
-git pull --ff-only origin main
-npm ci
-npm run db:generate
-npm run db:deploy
-npm run build
-# 复制 standalone 静态资源
-# 重启 echonote-web / echonote-worker
-# health check
+```text
+GitHub CI 通过
+-> 同步 main 到 CNB
+-> CNB 构建 runtime/migrate 镜像
+-> 推送 TCR immutable tags
+-> CVM 拉取镜像
+-> 运行 backward-compatible migration
+-> 切换 web/worker
+-> direct + nginx health check
+-> 失败恢复上一镜像或迁移期 systemd 版本
 ```
 
-生产服务和数据库变更必须分步执行：先拉代码和安装依赖，再执行 migration，再构建，再重启服务，最后健康检查。
+生产服务器不再执行 `git pull`、`npm ci` 或 `next build`。构建与运行职责分开，发布使用完整 commit SHA 对应的不可变镜像。数据库 migration 必须向后兼容；数据库不自动执行 down migration。
+
+CNB 尚未完成 build-only POC 和回滚演练前，现有 systemd 人工发布路径仍作为临时回退方式，且每次都需要用户明确确认。详细接入见 `docs/cnb-setup.md`。
 
 发布后 smoke test：
 
