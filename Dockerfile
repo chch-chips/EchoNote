@@ -31,6 +31,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# Prisma's migration engine requires OpenSSL at runtime on Debian slim images.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 
