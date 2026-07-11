@@ -555,7 +555,7 @@ EchoNote 已经有线上稳定版本，schema 变更必须通过 Prisma migratio
 
 - local-dev app：本机 `localhost:3000`，运行 `npm run dev`。
 - local-dev database：服务器 PostgreSQL 容器中的 `echo_note_dev`，用户 `echo_note_dev_user`，通过本机 SSH 隧道 `127.0.0.1:15432` 访问。
-- production app：`echonote-web` / `echonote-worker`。当前稳定版本仍由 systemd 守护；目标发布链路为 GitHub CI + CNB 构建 + TCR + Docker Compose，完成 POC 和回滚演练后再切换。
+- production app：`echonote-web` / `echonote-worker`。当前稳定版本由 Docker Compose 容器运行；发布链路为 GitHub CI + CNB 构建 + TCR + Docker Compose 自动部署。
 - production database：`echo_note`，用户 `echo_note_user`。
 
 如果生产库曾经被手工 hotfix，需要补同等 migration。能重复执行的变更优先写成幂等 SQL；不能重复执行时，确认生产库已经具备同等结构后，用 `prisma migrate resolve --applied "<migration-folder>"` 对齐迁移历史。

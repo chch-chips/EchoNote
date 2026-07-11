@@ -244,7 +244,7 @@ GitHub CI 通过
 
 生产服务器不再执行 `git pull`、`npm ci` 或 `next build`。构建与运行职责分开，发布使用完整 commit SHA 对应的不可变镜像。数据库 migration 必须向后兼容；数据库不自动执行 down migration。
 
-CNB 尚未完成 build-only POC 和回滚演练前，现有 systemd 人工发布路径仍作为临时回退方式，且每次都需要用户明确确认。详细接入见 `docs/cnb-setup.md`。
+CNB 的 build-only POC、首次容器切换和一次自动部署已验收，当前生产运行 Docker Compose。回滚仅回退应用镜像/进程状态；数据库 migration 不自动回退，schema 变更必须遵循向后兼容的 expand/contract 规则。详细接入见 `docs/cnb-setup.md`。
 
 发布后 smoke test：
 

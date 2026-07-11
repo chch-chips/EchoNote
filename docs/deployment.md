@@ -185,7 +185,7 @@ HTTPS 正式访问应为：
 SESSION_COOKIE_SECURE=true
 ```
 
-### 手动发布更新
+### 历史 systemd 手动发布（已停用）
 
 在本地开发完成并推送到 `origin/main` 后，SSH 到服务器执行：
 
@@ -206,9 +206,9 @@ curl -I http://127.0.0.1:8081/login
 
 若只是文案或前端变更且 Prisma schema 未变化，可以跳过 `npm run db:deploy`。若 `prisma/migrations/` 有新增迁移，必须先执行 `db:deploy`，再构建和重启服务。
 
-### Codex 直连 systemd 发布
+### 历史 Codex 直连 systemd 发布（已停用）
 
-这是当前可用的人工发布路径：用户明确允许后，由 Codex 通过 SSH 直连 `chips-server`，沿用服务器现有 `/opt/echonote` 工作目录和 `echonote-web` / `echonote-worker` systemd 服务完成发布。它不使用容器化脚本，不停止或禁用旧 systemd 服务，也不触发 GitHub Actions。
+此路径仅保留为迁移历史，不得再作为生产发布方式。生产发布必须走 GitHub → CNB → TCR → Docker Compose；旧 systemd 服务已禁用。
 
 适用场景：
 
@@ -309,7 +309,7 @@ feature branch -> GitHub PR -> GitHub Actions CI
 - `scripts/bootstrap-cnb-deploy.sh`：一次性安装受限部署边界，不切换运行服务。
 - `docs/cnb-setup.md`：用户开通与验收步骤。
 
-首次 CNB build-only POC 和回滚演练完成前，KeyStore 必须保持 `DEPLOY_ENABLED=false`，生产继续运行现有 systemd 服务。Codex 直连 systemd 发布仍可作为迁移期人工回退路径，但每次都需要用户明确确认。
+CNB build-only POC、首次容器切换和自动部署已完成验收，KeyStore 的 `DEPLOY_ENABLED` 已启用。生产由 `/opt/echonote-runtime/docker-compose.prod.yml` 管理 `echonote-web` 与 `echonote-worker`；旧 systemd 服务已禁用，不能再作为常规发布路径。故障时优先检查 CNB 记录、`/var/log/echonote-deploy.log`、`/var/lib/echonote-deploy/current.env` 和容器健康状态。
 
 ### 历史失败与 2026-07-10 新决策
 
