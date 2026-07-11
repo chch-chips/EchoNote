@@ -149,11 +149,11 @@ unset TCR_PASSWORD
 6. 失败时恢复旧 systemd 版本；后续版本失败时恢复上一容器镜像。
 7. 成功后才禁用旧 systemd 开机自启。
 
-首次成功后必须演练一次指定旧 SHA 的回滚。数据库 migration 不自动向下回滚，schema 变更必须遵循 expand/contract 和向后兼容规则。
+建议在低风险窗口演练一次指定旧 SHA 的应用镜像回滚。数据库 migration 不自动向下回滚，schema 变更必须遵循 expand/contract 和向后兼容规则。
 
 ## 9. 正式启用
 
-构建 POC、首次部署和回滚演练全部通过后，将 KeyStore 的 `registry.yml` 改为：
+完成 build-only POC、首次容器切换，并确认部署密钥与服务器 TCR 登录可用后，将 KeyStore 的 `registry.yml` 改为：
 
 ```yaml
 DEPLOY_ENABLED: "true"
@@ -180,3 +180,15 @@ cat /var/lib/echonote-deploy/current.env
 ```
 
 状态文件只记录镜像引用和 commit，不包含数据库或 API secret。
+
+## 11. 当前验收状态
+
+截至 2026-07-11，以下链路已在生产环境完成验证：
+
+- GitHub `main` 合并后，GitHub Actions 成功同步源码到 CNB。
+- CNB 成功构建 runtime 与 migrate 两个 Docker target，并推送带完整 commit SHA 的 TCR tags。
+- CNB 使用 KeyStore 中的专用 `echonote-deploy` 私钥连接 CVM，调用 root-owned 部署脚本。
+- CVM 成功拉取镜像、确认 Prisma migrations 无待执行项、切换 Web 与 worker 容器，并通过 `127.0.0.1:3001/login` 和 `127.0.0.1:8081/login` 健康检查。
+- 旧 `echonote-web` 与 `echonote-worker` systemd 服务已禁用；生产服务器不再从 GitHub 拉代码或本地构建。
+
+日常发布只需将经 CI 验证的 PR 合并至 `main`。若部署失败，先保留现场并查看 CNB 记录及第 10 节的服务器日志；不要通过重新执行 `git pull` 或 `npm ci` 绕过该链路。
